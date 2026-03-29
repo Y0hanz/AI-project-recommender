@@ -16,7 +16,7 @@ function Navbar() {
     <header className="sticky top-0 z-50 border-b border-white/5 bg-black/40 backdrop-blur-2xl">
       <div className="container-shell">
         <div className="flex h-20 items-center justify-between">
-          <Link to="/" className="group flex items-center gap-3">
+          <Link to="/" className="cursor-target group flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-500 text-sm font-black text-white shadow-glow transition group-hover:scale-105">
               AI
             </div>
@@ -34,7 +34,7 @@ function Navbar() {
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) =>
-                  `rounded-full px-4 py-2 text-sm font-medium transition ${
+                  `cursor-target rounded-full px-4 py-2 text-sm font-medium transition ${
                     isActive
                       ? "bg-white/10 text-white"
                       : "text-white/60 hover:bg-white/5 hover:text-white"
@@ -44,7 +44,7 @@ function Navbar() {
                 {item.label}
               </NavLink>
             ))}
-            <Link to="/questionnaire" className="btn-primary ml-2">
+            <Link to="/questionnaire" className="btn-primary cursor-target ml-2">
               Start
             </Link>
           </nav>
