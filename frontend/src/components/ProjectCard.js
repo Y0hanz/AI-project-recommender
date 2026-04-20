@@ -15,6 +15,12 @@ const cardVariants = {
 
 function ProjectCard({ project, onOpen, index }) {
   const score = Number(project.score || 0);
+  const geminiAvailable = Boolean(project.geminiAvailable);
+  const geminiConfidence = Math.round(Number(project.geminiConfidence || 0));
+  const fitSummary =
+    project.geminiFitSummary ||
+    project.fitSummary ||
+    "No AI summary available for this result.";
 
   return (
     <motion.article
@@ -32,8 +38,19 @@ function ProjectCard({ project, onOpen, index }) {
               <span className="rounded-full border border-brand-500/25 bg-brand-500/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-brand-300">
                 #{index + 1}
               </span>
+
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-white/50">
                 {project.difficulty || "N/A"}
+              </span>
+
+              <span
+                className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.18em] ${
+                  geminiAvailable
+                    ? "border border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                    : "border border-amber-400/30 bg-amber-400/10 text-amber-200"
+                }`}
+              >
+                {geminiAvailable ? "Gemini" : "Fallback"}
               </span>
             </div>
 
@@ -50,9 +67,38 @@ function ProjectCard({ project, onOpen, index }) {
           </div>
         </div>
 
-        <p className="mb-5 line-clamp-4 text-sm leading-7 text-white/63">
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-white/35">
+              AI Confidence
+            </p>
+            <p className="mt-2 text-lg font-bold text-white">
+              {geminiConfidence}%
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-white/35">
+              Engine
+            </p>
+            <p className="mt-2 text-sm font-semibold text-white">
+              {geminiAvailable ? "Gemini-assisted ranking" : "Deterministic fallback"}
+            </p>
+          </div>
+        </div>
+
+        <p className="mb-4 line-clamp-3 text-sm leading-7 text-white/63">
           {project.description}
         </p>
+
+        <div className="mb-5 rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+          <p className="text-[10px] uppercase tracking-[0.16em] text-white/35">
+            Gemini Fit Summary
+          </p>
+          <p className="mt-2 line-clamp-3 text-sm leading-6 text-white/70">
+            {fitSummary}
+          </p>
+        </div>
 
         <div className="mb-6 flex flex-wrap gap-2">
           {(project.technologies || []).slice(0, 5).map((tech) => (

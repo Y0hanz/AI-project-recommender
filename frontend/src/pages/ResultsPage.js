@@ -13,8 +13,7 @@ import {
   fetchRecommendations,
   getSavedPreferences,
   getSavedRecommendations,
-  saveRecommendations,
-  shuffleProjects
+  saveRecommendations
 } from "../utils/api";
 
 const pageReveal = {
@@ -47,6 +46,8 @@ function ResultsPage() {
   const [gridKey, setGridKey] = useState(0);
 
   const heroRef = useRef(null);
+  const autoRetryRef = useRef(false);
+
   const { scrollYProgress } = useScroll({
     target: heroRef,
     offset: ["start start", "end start"]
@@ -57,10 +58,54 @@ function ResultsPage() {
   const panelY = useTransform(scrollYProgress, [0, 1], [0, -40]);
   const heroOpacity = useTransform(scrollYProgress, [0, 0.8], [1, 0.74]);
 
+  const requestFreshResults = async (prefs, { silent = false } = {}) => {
+    try {
+      if (!silent) {
+        setLoading(true);
+        setNotice("");
+      }
+
+      const freshProjects = await fetchRecommendations(prefs);
+
+      saveRecommendations(freshProjects);
+      setProjects(freshProjects);
+      setGridKey((prev) => prev + 1);
+
+      const allFallback = freshProjects.every((item) => item?.geminiAvailable === false);
+
+      if (allFallback) {
+        setNotice("Gemini enrichment is still unavailable. Showing deterministic fallback results.");
+      } else {
+        setNotice("");
+      }
+    } catch (err) {
+      setNotice(err.message || "Failed to regenerate recommendations.");
+    } finally {
+      if (!silent) {
+        setLoading(false);
+      }
+    }
+  };
+
   useEffect(() => {
     const saved = getSavedRecommendations();
-    if (saved.length) {
-      setProjects(saved);
+    const prefs = getSavedPreferences();
+
+    if (!saved.length) {
+      return;
+    }
+
+    setProjects(saved);
+
+    const allFallback = saved.every((item) => item?.geminiAvailable === false);
+
+    if (allFallback) {
+      setNotice("Cached fallback results detected. Retrying fresh recommendations...");
+
+      if (prefs && !autoRetryRef.current) {
+        autoRetryRef.current = true;
+        requestFreshResults(prefs, { silent: true });
+      }
     }
   }, []);
 
@@ -69,6 +114,11 @@ function ResultsPage() {
   }, [projects]);
 
   const topProject = sortedProjects[0] || null;
+  const topConfidence = Math.round(Number(topProject?.geminiConfidence || 0));
+  const topFitSummary =
+    topProject?.geminiFitSummary ||
+    topProject?.fitSummary ||
+    "No AI fit summary available.";
 
   const handleRegenerate = async () => {
     const prefs = getSavedPreferences();
@@ -78,21 +128,7 @@ function ResultsPage() {
       return;
     }
 
-    try {
-      setLoading(true);
-      setNotice("");
-
-      const freshProjects = await fetchRecommendations(prefs);
-      const randomized = shuffleProjects(freshProjects);
-
-      saveRecommendations(randomized);
-      setProjects(randomized);
-      setGridKey((prev) => prev + 1);
-    } catch (err) {
-      setNotice(err.message || "Failed to regenerate recommendations.");
-    } finally {
-      setLoading(false);
-    }
+    await requestFreshResults(prefs);
   };
 
   return (
@@ -134,8 +170,7 @@ function ResultsPage() {
                   <span className="block text-white/45">to your creative direction.</span>
                 </h1>
                 <p className="mt-5 max-w-2xl text-sm leading-7 text-white/60 sm:text-base">
-                  Ranked by your backend engine using difficulty fit, project type alignment,
-                  technologies, and thematic interest overlap.
+                  Ranked by your backend engine using deterministic scoring and Gemini enrichment when available.
                 </p>
               </div>
 
@@ -177,8 +212,19 @@ function ResultsPage() {
                       <span className="rounded-full border border-brand-500/25 bg-brand-500/10 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-brand-300">
                         Top Match
                       </span>
+
                       <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.24em] text-white/50">
                         {topProject.projectType || "Project"}
+                      </span>
+
+                      <span
+                        className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.24em] ${
+                          topProject.geminiAvailable
+                            ? "border border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                            : "border border-amber-400/30 bg-amber-400/10 text-amber-200"
+                        }`}
+                      >
+                        {topProject.geminiAvailable ? "Gemini" : "Fallback"}
                       </span>
                     </div>
 
@@ -189,6 +235,15 @@ function ResultsPage() {
                     <p className="mt-4 max-w-2xl text-sm leading-7 text-white/63 sm:text-base">
                       {topProject.description}
                     </p>
+
+                    <div className="mt-5 rounded-3xl border border-white/10 bg-black/20 p-4">
+                      <p className="text-[10px] uppercase tracking-[0.22em] text-white/38">
+                        Gemini Fit Summary
+                      </p>
+                      <p className="mt-2 text-sm leading-7 text-white/70">
+                        {topFitSummary}
+                      </p>
+                    </div>
 
                     <div className="mt-6 flex flex-wrap gap-2">
                       {(topProject.technologies || []).slice(0, 6).map((tech) => (
@@ -211,10 +266,10 @@ function ResultsPage() {
 
                     <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
                       <p className="text-[10px] uppercase tracking-[0.24em] text-white/40">
-                        Difficulty
+                        AI Confidence
                       </p>
-                      <p className="mt-3 text-lg font-semibold capitalize text-white">
-                        {topProject.difficulty || "N/A"}
+                      <p className="mt-3 text-4xl font-black text-white">
+                        {topConfidence}%
                       </p>
                     </div>
 

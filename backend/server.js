@@ -6,6 +6,7 @@ const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 const recommendRoute = require("./routes/recommend");
+const feedbackRoute = require("./routes/feedback");
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.get("/", (req, res) => {
 
 // Routes
 app.use("/recommend", recommendRoute);
+app.use("/feedback", feedbackRoute);
 
 // MongoDB connection
 mongoose

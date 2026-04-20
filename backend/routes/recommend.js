@@ -2,66 +2,161 @@
 const express = require("express");
 const router = express.Router();
 const Project = require("../models/Project");
+const {
+  scoreBaselineProjects,
+  pickBaselineWindow,
+  buildHybridRecommendations
+} = require("../services/hybridRecommender");
 
-// POST /recommend
-router.post("/", async (req, res) => {
-    try {
-        let { skill, difficulty, interests, projectType, languages } = req.body;
+function safeString(value) {
+  return String(value || "").trim();
+}
 
-        if (!difficulty || !interests) {
-            return res.status(400).json({ error: "Missing required fields" });
-        }
+function normalizeLowerArray(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || "").trim().toLowerCase())
+      .filter(Boolean);
+  }
 
-        const allProjects = await Project.find();
-        if (!allProjects.length) return res.status(404).json({ error: "No projects found" });
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+  }
 
-        // Normalize input
-        interests = interests.map(i => i.toLowerCase());
-        languages = (languages || []).map(l => l.toLowerCase());
-        difficulty = difficulty.toLowerCase();
-        projectType = projectType ? projectType.toLowerCase() : "";
+  return [];
+}
 
-        const scoredProjects = allProjects.map(proj => {
-            let score = 0;
+function round1(value) {
+  return Math.round(Number(value || 0) * 10) / 10;
+}
 
-            // Difficulty match
-            if (proj.difficulty.toLowerCase() === difficulty) score += 3;
+function buildFallbackProject(project, fallbackReason) {
+  const signals = Array.isArray(project.deterministicSignals)
+    ? project.deterministicSignals.slice(0, 3)
+    : [];
 
-            // Project type match
-            if (projectType && proj.projectType.toLowerCase() === projectType) score += 3;
-
-            // Categories match
-            const categoryMatches = proj.categories.filter(cat => interests.includes(cat.toLowerCase())).length;
-            score += categoryMatches * 2;
-
-            // Technology / languages match
-            const techMatches = proj.technologies.filter(t => languages.includes(t.toLowerCase())).length;
-            score += techMatches * 1.5;
-
-            // Optional: bonus if skill matches difficulty roughly
-            if (skill) {
-                const skillMap = { "beginner": "easy", "intermediate": "medium", "advanced": "hard" };
-                if (skillMap[skill.toLowerCase()] === proj.difficulty.toLowerCase()) score += 1;
-            }
-
-            return { ...proj.toObject(), score };
-        });
-
-        // Sort descending by score
-        const sorted = scoredProjects.sort((a, b) => b.score - a.score);
-
-        // Fallback: if no project has score > 0, just return 5 random projects
-        const hasPositive = sorted.some(p => p.score > 0);
-        const topProjects = hasPositive
-            ? sorted.slice(0, 10)
-            : allProjects.sort(() => Math.random() - 0.5).slice(0, 5);
-
-        res.json(topProjects);
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Server error" });
+  return {
+    ...project,
+    score: round1(project.deterministicScore || project.score || 0),
+    geminiAvailable: false,
+    geminiScore: 0,
+    geminiConfidence: 0,
+    fitSummary:
+      "The Gemini layer was unavailable, so the baseline recommender returned this project.",
+    geminiFitSummary:
+      "The Gemini layer was unavailable, so the baseline recommender returned this project.",
+    whyRecommended: signals.length ? signals : ["Matched by baseline scoring logic."],
+    insightSnapshot: {
+      mode:
+        project.aiMode === "deterministic_extension"
+          ? "deterministic_extension"
+          : "deterministic_fallback",
+      geminiConfidence: "0%",
+      topSignals: signals,
+      fallbackReason: fallbackReason || project.aiReason || "Unknown Gemini fallback reason."
+    },
+    explanationLayer: {
+      mode:
+        project.aiMode === "deterministic_extension"
+          ? "deterministic_extension"
+          : "deterministic_fallback",
+      fitSummary:
+        project.aiMode === "deterministic_extension"
+          ? "This result extends the list beyond the Gemini-ranked shortlist and comes from deterministic scoring."
+          : "Fallback mode is active. This result comes from your deterministic scoring logic.",
+      whyRecommended: signals.length ? signals : ["Matched by baseline scoring logic."]
     }
+  };
+}
+
+function buildGeminiProject(project) {
+  const geminiScore = Number(project.geminiScore || 0);
+  const geminiConfidence = Number(project.geminiConfidence || 0);
+  const deterministicScore = Number(project.deterministicScore || project.score || 0);
+
+  const blendedScore = round1(deterministicScore * 0.55 + geminiScore * 0.45);
+
+  const whyRecommended =
+    Array.isArray(project.whyRecommended) && project.whyRecommended.length
+      ? project.whyRecommended.slice(0, 3)
+      : Array.isArray(project.deterministicSignals)
+        ? project.deterministicSignals.slice(0, 3)
+        : ["Matched by Gemini and baseline scoring."];
+
+  const fitSummary =
+    safeString(project.aiFitSummary) ||
+    "Gemini ranked this project as a strong fit for the submitted preferences.";
+
+  return {
+    ...project,
+    score: blendedScore,
+    geminiAvailable: true,
+    geminiScore,
+    geminiConfidence,
+    fitSummary,
+    geminiFitSummary: fitSummary,
+    whyRecommended,
+    insightSnapshot: {
+      mode: "gemini_assisted",
+      geminiConfidence: `${Math.round(geminiConfidence)}%`,
+      topSignals: whyRecommended
+    },
+    explanationLayer: {
+      mode: "gemini_assisted",
+      fitSummary,
+      whyRecommended
+    }
+  };
+}
+
+router.post("/", async (req, res) => {
+  try {
+    let { skill, difficulty, interests, projectType, languages } = req.body || {};
+
+    const userPreferences = {
+      skill: safeString(skill),
+      difficulty: safeString(difficulty).toLowerCase(),
+      interests: normalizeLowerArray(interests),
+      projectType: safeString(projectType).toLowerCase(),
+      languages: normalizeLowerArray(languages)
+    };
+
+    if (!userPreferences.difficulty || userPreferences.interests.length === 0) {
+      return res.status(400).json({
+        error: "Missing required fields: difficulty and at least one interest."
+      });
+    }
+
+    const allProjects = await Project.find().lean();
+
+    if (!allProjects.length) {
+      return res.status(404).json({ error: "No projects found." });
+    }
+
+    const scoredProjects = scoreBaselineProjects(allProjects, userPreferences);
+    const shortlistedProjects = pickBaselineWindow(scoredProjects);
+
+    const hybrid = await buildHybridRecommendations({
+      userPreferences,
+      shortlistedProjects
+    });
+
+    const finalProjects = hybrid.projects.map((project) => {
+      if (project.aiEnhanced) {
+        return buildGeminiProject(project);
+      }
+
+      return buildFallbackProject(project, hybrid.aiMeta?.reason || project.aiReason);
+    });
+
+    return res.json(finalProjects);
+  } catch (err) {
+    console.error("Recommendation route error:", err);
+    return res.status(500).json({ error: "Server error." });
+  }
 });
 
 module.exports = router;

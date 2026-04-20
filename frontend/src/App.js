@@ -3,10 +3,10 @@ import { AnimatePresence, motion } from "framer-motion";
 import "./App.css";
 
 import Navbar from "./components/Navbar";
-import TargetCursor from "./components/TargetCursor";
 import Home from "./pages/Home";
 import QuestionnairePage from "./pages/QuestionnairePage";
 import ResultsPage from "./pages/ResultsPage";
+import ResearchInsightsPage from "./pages/ResearchInsightsPage";
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -24,6 +24,7 @@ function AnimatedRoutes() {
           <Route path="/" element={<Home />} />
           <Route path="/questionnaire" element={<QuestionnairePage />} />
           <Route path="/results" element={<ResultsPage />} />
+          <Route path="/research" element={<ResearchInsightsPage />} />
         </Routes>
       </motion.div>
     </AnimatePresence>
@@ -37,15 +38,6 @@ function App() {
         <div className="fixed inset-0 -z-20 bg-surface-950" />
         <div className="orb left-[-120px] top-[120px] -z-10 h-72 w-72 bg-brand-500/15 animate-pulseSlow" />
         <div className="orb bottom-[80px] right-[-80px] -z-10 h-80 w-80 bg-brand-500/10 animate-floaty" />
-
-        <TargetCursor
-          targetSelector=".cursor-target"
-          spinDuration={2}
-          hideDefaultCursor={true}
-          hoverDuration={0.18}
-          parallaxOn={true}
-        />
-
         <Navbar />
         <AnimatedRoutes />
       </div>

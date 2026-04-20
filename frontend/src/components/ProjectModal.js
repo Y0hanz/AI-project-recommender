@@ -29,6 +29,21 @@ const modal = {
 
 function ProjectModal({ project, onClose }) {
   const score = Number(project.score || 0);
+  const geminiAvailable = Boolean(project.geminiAvailable);
+  const geminiConfidence = Math.round(Number(project.geminiConfidence || 0));
+  const fitSummary =
+    project.geminiFitSummary ||
+    project.fitSummary ||
+    project.explanationLayer?.fitSummary ||
+    "No AI fit summary was generated.";
+
+  const whyRecommended = Array.isArray(project.whyRecommended)
+    ? project.whyRecommended
+    : Array.isArray(project.explanationLayer?.whyRecommended)
+      ? project.explanationLayer.whyRecommended
+      : [];
+
+  const fallbackReason = project?.insightSnapshot?.fallbackReason || "";
 
   return (
     <motion.div
@@ -45,7 +60,7 @@ function ProjectModal({ project, onClose }) {
         animate="visible"
         exit="exit"
         onClick={(e) => e.stopPropagation()}
-        className="glass-panel relative max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-[2rem] p-6 shadow-soft sm:p-8"
+        className="glass-panel relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[2rem] p-6 shadow-soft sm:p-8"
       >
         <div className="absolute inset-0 rounded-[2rem] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.14),transparent_28%),linear-gradient(to_bottom_right,rgba(255,255,255,0.02),transparent_35%)]" />
 
@@ -62,11 +77,23 @@ function ProjectModal({ project, onClose }) {
             <span className="rounded-full border border-brand-500/25 bg-brand-500/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-brand-300">
               Detailed Brief
             </span>
+
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-white/50">
               {project.projectType || "Project"}
             </span>
+
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-white/50">
               {project.difficulty || "N/A"}
+            </span>
+
+            <span
+              className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.22em] ${
+                geminiAvailable
+                  ? "border border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                  : "border border-amber-400/30 bg-amber-400/10 text-amber-200"
+              }`}
+            >
+              {geminiAvailable ? "Gemini" : "Fallback"}
             </span>
           </div>
 
@@ -82,6 +109,33 @@ function ProjectModal({ project, onClose }) {
 
               <div className="mt-8 rounded-3xl border border-white/10 bg-black/25 p-5">
                 <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-white/38">
+                  Gemini Fit Summary
+                </p>
+                <p className="text-sm leading-7 text-white/72">
+                  {fitSummary}
+                </p>
+              </div>
+
+              {!!whyRecommended.length && (
+                <div className="mt-5 rounded-3xl border border-white/10 bg-black/25 p-5">
+                  <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-white/38">
+                    Why Recommended
+                  </p>
+                  <div className="space-y-3">
+                    {whyRecommended.slice(0, 3).map((reason, idx) => (
+                      <div
+                        key={`${reason}-${idx}`}
+                        className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-white/72"
+                      >
+                        {reason}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-5 rounded-3xl border border-white/10 bg-black/25 p-5">
+                <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-white/38">
                   Technologies
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -92,6 +146,17 @@ function ProjectModal({ project, onClose }) {
                   ))}
                 </div>
               </div>
+
+              {!geminiAvailable && fallbackReason && (
+                <div className="mt-5 rounded-3xl border border-amber-400/25 bg-amber-400/10 p-5">
+                  <p className="mb-2 text-[11px] uppercase tracking-[0.22em] text-amber-200/85">
+                    Fallback Reason
+                  </p>
+                  <p className="text-sm leading-7 text-amber-100/85">
+                    {fallbackReason}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
@@ -102,6 +167,15 @@ function ProjectModal({ project, onClose }) {
                   </p>
                   <p className="mt-3 text-4xl font-black text-white">
                     {score.toFixed(1)}
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-white/38">
+                    AI Confidence
+                  </p>
+                  <p className="mt-3 text-4xl font-black text-white">
+                    {geminiConfidence}%
                   </p>
                 </div>
 
@@ -130,6 +204,17 @@ function ProjectModal({ project, onClose }) {
                 </p>
                 <p className="text-sm leading-7 text-white/66">
                   {project.learning || "No learning path was defined yet. You can frame this around architecture, tooling, and implementation depth in your presentation."}
+                </p>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
+                <p className="mb-3 text-[10px] uppercase tracking-[0.22em] text-white/38">
+                  Engine Status
+                </p>
+                <p className="text-sm leading-7 text-white/66">
+                  {geminiAvailable
+                    ? "Gemini enrichment is active for this result."
+                    : "Gemini enrichment was unavailable, so the fallback ranking was used."}
                 </p>
               </div>
             </div>
