@@ -1,29 +1,34 @@
+const http = require("node:http");
+const dns = require("node:dns");
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const path = require("path");
 
+dns.setDefaultResultOrder("ipv4first");
+
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
+
+if (typeof http.setGlobalProxyFromEnv === "function") {
+  http.setGlobalProxyFromEnv();
+  console.log("Global proxy loaded from env for Node HTTP/fetch.");
+}
 
 const recommendRoute = require("./routes/recommend");
 const feedbackRoute = require("./routes/feedback");
 
 const app = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Test route
 app.get("/", (req, res) => {
   res.send("AI Project Recommender API Running");
 });
 
-// Routes
 app.use("/recommend", recommendRoute);
 app.use("/feedback", feedbackRoute);
 
-// MongoDB connection
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => {

@@ -28,6 +28,10 @@ export function formatProjectScore(project) {
   return project?.score || 0;
 }
 
+export function formatAiConfidence(confidence) {
+  return Number.isFinite(Number(confidence)) ? `${Number(confidence)}%` : "Unavailable";
+}
+
 export function sortRecommendedProjects(projects = []) {
   return [...projects].sort((a, b) => {
     const aAiRank = Number.isFinite(Number(a?.aiRank)) ? Number(a.aiRank) : null;
@@ -88,9 +92,7 @@ export function buildLocalExplanation(project, preferences = {}) {
       label: "Tech Alignment",
       value: clampScore(
         normalizedLanguages.length
-          ? Math.round(
-              (languageMatches.length / normalizedLanguages.length) * 100
-            )
+          ? Math.round((languageMatches.length / normalizedLanguages.length) * 100)
           : 45
       ),
       tone:
@@ -104,9 +106,7 @@ export function buildLocalExplanation(project, preferences = {}) {
       label: "Interest Fit",
       value: clampScore(
         normalizedInterests.length
-          ? Math.round(
-              (interestMatches.length / normalizedInterests.length) * 100
-            )
+          ? Math.round((interestMatches.length / normalizedInterests.length) * 100)
           : 45
       ),
       tone:
@@ -133,7 +133,7 @@ export function buildLocalExplanation(project, preferences = {}) {
 
   if (skillAligned) {
     reasons.push(
-      `It aligns well with your ${preferences?.skill} skill level and should feel appropriately challenging.`
+      `It aligns well with your ${preferences?.skill} skill level.`
     );
   }
 
@@ -145,23 +145,19 @@ export function buildLocalExplanation(project, preferences = {}) {
 
   if (languageMatches.length) {
     reasons.push(
-      `It uses technologies you selected, including ${languageMatches
-        .slice(0, 3)
-        .join(", ")}.`
+      `It uses technologies you selected, including ${languageMatches.slice(0, 3).join(", ")}.`
     );
   }
 
   if (interestMatches.length) {
     reasons.push(
-      `Its focus overlaps with your interests, especially ${interestMatches
-        .slice(0, 3)
-        .join(", ")}.`
+      `Its focus overlaps with your interests, especially ${interestMatches.slice(0, 3).join(", ")}.`
     );
   }
 
   if (!reasons.length) {
     reasons.push(
-      "It still ranks as a strong option because its overall profile stays close to your selected direction."
+      "It still ranks as a strong option based on your selected direction."
     );
   }
 
@@ -172,10 +168,8 @@ export function buildLocalExplanation(project, preferences = {}) {
     .map((item) => item.label);
 
   const fitSummary = strongestSignals.length
-    ? `This recommendation stands out because of its ${strongestSignals
-        .join(", ")
-        .toLowerCase()}.`
-    : "This recommendation is a balanced match across multiple parts of your profile.";
+    ? `Strong local match on ${strongestSignals.join(", ").toLowerCase()}.`
+    : "Balanced local match across your profile.";
 
   const averageSignal =
     scoreBreakdown.reduce((sum, item) => sum + item.value, 0) /
@@ -188,7 +182,7 @@ export function buildLocalExplanation(project, preferences = {}) {
     scoreBreakdown,
     fitSummary,
     primaryReason: reasons[0] || fitSummary,
-    strengths: reasons.slice(0, 4),
+    strengths: reasons.slice(0, 3),
     concerns: [],
     averageSignal: Math.round(averageSignal)
   };
@@ -207,19 +201,19 @@ export function getProjectInsight(project, preferences = {}) {
 
   const isAiEnhanced =
     Boolean(project?.aiEnhanced) ||
-    Boolean(hasAiSummary) ||
-    Boolean(hasAiReason) ||
+    hasAiSummary ||
+    hasAiReason ||
     aiStrengths.length > 0 ||
     aiConcerns.length > 0 ||
     hasAiConfidence;
 
   return {
     ...fallback,
-    source: isAiEnhanced ? "gemini" : "local",
+    source: isAiEnhanced ? "gemini" : "fallback",
     isAiEnhanced,
-    confidence: hasAiConfidence ? Number(project.aiConfidence) : fallback.confidence,
-    fitSummary: hasAiSummary ? project.aiFitSummary : fallback.fitSummary,
-    primaryReason: hasAiReason ? project.aiReason : fallback.primaryReason,
+    confidence: hasAiConfidence ? Number(project.aiConfidence) : null,
+    fitSummary: hasAiSummary ? project.aiFitSummary : "AI summary unavailable. Showing deterministic shortlist.",
+    primaryReason: hasAiReason ? project.aiReason : "Gemini was unavailable for this request.",
     strengths: aiStrengths.length ? aiStrengths : fallback.strengths,
     concerns: aiConcerns.length ? aiConcerns : fallback.concerns
   };

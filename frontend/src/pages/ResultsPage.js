@@ -71,9 +71,9 @@ function ResultsPage() {
       setProjects(freshProjects);
       setGridKey((prev) => prev + 1);
 
-      const allFallback = freshProjects.every((item) => item?.geminiAvailable === false);
+      const anyGemini = freshProjects.some((item) => item?.geminiAvailable === true);
 
-      if (allFallback) {
+      if (!anyGemini) {
         setNotice("Gemini enrichment is still unavailable. Showing deterministic fallback results.");
       } else {
         setNotice("");
@@ -97,9 +97,9 @@ function ResultsPage() {
 
     setProjects(saved);
 
-    const allFallback = saved.every((item) => item?.geminiAvailable === false);
+    const anyGemini = saved.some((item) => item?.geminiAvailable === true);
 
-    if (allFallback) {
+    if (!anyGemini) {
       setNotice("Cached fallback results detected. Retrying fresh recommendations...");
 
       if (prefs && !autoRetryRef.current) {
@@ -110,7 +110,19 @@ function ResultsPage() {
   }, []);
 
   const sortedProjects = useMemo(() => {
-    return [...projects].sort((a, b) => (b.score || 0) - (a.score || 0));
+    return [...projects].sort((a, b) => {
+      const aRank = Number.isFinite(Number(a.uiRank)) ? Number(a.uiRank) : null;
+      const bRank = Number.isFinite(Number(b.uiRank)) ? Number(b.uiRank) : null;
+
+      if (a.geminiAvailable && b.geminiAvailable && aRank !== null && bRank !== null) {
+        return aRank - bRank;
+      }
+
+      if (a.geminiAvailable && !b.geminiAvailable) return -1;
+      if (!a.geminiAvailable && b.geminiAvailable) return 1;
+
+      return (b.score || 0) - (a.score || 0);
+    });
   }, [projects]);
 
   const topProject = sortedProjects[0] || null;

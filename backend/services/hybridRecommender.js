@@ -5,49 +5,25 @@ function normalize(value) {
 }
 
 function toArray(value) {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => String(item || "").trim())
-      .filter(Boolean);
-  }
-
-  if (typeof value === "string") {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-  }
-
-  return [];
+  return Array.isArray(value) ? value : [];
 }
 
 function shuffleArray(items = []) {
   return [...items].sort(() => Math.random() - 0.5);
 }
 
-function round1(value) {
-  return Math.round(Number(value || 0) * 10) / 10;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function buildDeterministicSignals({
-  difficultyScore,
-  projectTypeScore,
-  categoryMatches,
-  technologyMatches,
-  skillScore,
-  project
-}) {
-  return [
-    difficultyScore > 0 ? `Difficulty matches (${project.difficulty})` : null,
-    projectTypeScore > 0 ? `Project type matches (${project.projectType})` : null,
-    categoryMatches.length ? `Interest overlap: ${categoryMatches.join(", ")}` : null,
-    technologyMatches.length ? `Tech overlap: ${technologyMatches.join(", ")}` : null,
-    skillScore > 0 ? "Skill level aligns with difficulty" : null
-  ].filter(Boolean);
+function isRetryableGeminiError(error) {
+  const message = String(error?.message || "");
+  return (
+    message.includes("503") ||
+    message.includes("UNAVAILABLE") ||
+    message.includes("high demand") ||
+    message.includes("fetch failed")
+  );
 }
 
 function scoreBaselineProjects(allProjects, userPreferences = {}) {
@@ -65,83 +41,78 @@ function scoreBaselineProjects(allProjects, userPreferences = {}) {
   const normalizedLanguages = toArray(languages).map(normalize);
   const normalizedSkill = normalize(skill);
 
-  const skillMap = {
-    beginner: "easy",
-    intermediate: "medium",
-    advanced: "hard"
-  };
-
   return allProjects.map((project) => {
-    const normalizedProjectDifficulty = normalize(project.difficulty);
-    const normalizedProjectTypeValue = normalize(project.projectType);
+    let score = 0;
+
+    if (normalize(project.difficulty) === normalizedDifficulty) {
+      score += 3;
+    }
+
+    if (
+      normalizedProjectType &&
+      normalize(project.projectType) === normalizedProjectType
+    ) {
+      score += 3;
+    }
 
     const categoryMatches = toArray(project.categories).filter((category) =>
       normalizedInterests.includes(normalize(category))
-    );
+    ).length;
+    score += categoryMatches * 2;
 
-    const technologyMatches = toArray(project.technologies).filter((tech) =>
+    const techMatches = toArray(project.technologies).filter((tech) =>
       normalizedLanguages.includes(normalize(tech))
-    );
+    ).length;
+    score += techMatches * 1.5;
 
-    const difficultyScore =
-      normalizedProjectDifficulty === normalizedDifficulty ? 30 : 0;
+    if (normalizedSkill) {
+      const skillMap = {
+        beginner: "easy",
+        intermediate: "medium",
+        advanced: "hard"
+      };
 
-    const projectTypeScore =
-      normalizedProjectType &&
-      normalizedProjectTypeValue === normalizedProjectType
-        ? 20
-        : 0;
-
-    const categoryScore = Math.min(categoryMatches.length * 10, 25);
-    const technologyScore = Math.min(technologyMatches.length * 6, 20);
-
-    const skillScore =
-      normalizedSkill &&
-      skillMap[normalizedSkill] === normalizedProjectDifficulty
-        ? 5
-        : 0;
-
-    const deterministicScore =
-      difficultyScore +
-      projectTypeScore +
-      categoryScore +
-      technologyScore +
-      skillScore;
+      if (skillMap[normalizedSkill] === normalize(project.difficulty)) {
+        score += 1;
+      }
+    }
 
     return {
       ...project,
-      deterministicScore,
-      score: deterministicScore,
-      scoreBreakdown: {
-        difficulty: difficultyScore,
-        projectType: projectTypeScore,
-        categories: categoryScore,
-        technologies: technologyScore,
-        skillAlignment: skillScore,
-        total: deterministicScore
-      },
-      categoryMatches,
-      technologyMatches,
-      deterministicSignals: buildDeterministicSignals({
-        difficultyScore,
-        projectTypeScore,
-        categoryMatches,
-        technologyMatches,
-        skillScore,
-        project
-      })
+      score
     };
   });
 }
 
 function pickBaselineWindow(scoredProjects = []) {
-  const sorted = [...scoredProjects].sort(
-    (a, b) => (b.deterministicScore || 0) - (a.deterministicScore || 0)
-  );
+  const sorted = [...scoredProjects].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const hasPositive = sorted.some((project) => (project.score || 0) > 0);
 
-  const hasPositive = sorted.some((project) => (project.deterministicScore || 0) > 0);
+  return hasPositive
+    ? sorted.slice(0, 10)
+    : shuffleArray(sorted).slice(0, 5);
+}
 
-  return hasPositive ? sorted.slice(0, 10) : shuffleArray(sorted).slice(0, 10);
+function sanitizeAiRecord(record) {
+  return {
+    candidateId: String(record?.candidateId || ""),
+    aiRank: Number.isFinite(Number(record?.aiRank))
+      ? Number(record.aiRank)
+      : 999,
+    aiConfidence: Number.isFinite(Number(record?.aiConfidence))
+      ? Math.max(0, Math.min(100, Number(record.aiConfidence)))
+      : null,
+    aiFitSummary: String(record?.aiFitSummary || "").trim(),
+    aiReason: String(record?.aiReason || "").trim(),
+    aiStrengths: toArray(record?.aiStrengths)
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .slice(0, 2),
+    aiConcerns: toArray(record?.aiConcerns)
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .slice(0, 2)
+  };
 }
 
 function extractGeminiText(responseJson) {
@@ -149,43 +120,41 @@ function extractGeminiText(responseJson) {
   return parts
     .map((part) => part?.text || "")
     .filter(Boolean)
-    .join("")
-    .trim();
+    .join("");
 }
 
-function extractJson(text) {
-  if (!text) {
-    throw new Error("Gemini returned an empty response.");
+function safeJsonParse(text) {
+  if (!text || typeof text !== "string") return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    // continue
   }
 
-  const fencedMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fencedMatch ? fencedMatch[1].trim() : text.trim();
-
-  const firstBrace = candidate.indexOf("{");
-  const lastBrace = candidate.lastIndexOf("}");
-
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-    throw new Error("Gemini response did not contain valid JSON.");
+  const fencedJson = text.match(/```json\s*([\s\S]*?)```/i);
+  if (fencedJson?.[1]) {
+    try {
+      return JSON.parse(fencedJson[1]);
+    } catch {
+      // continue
+    }
   }
 
-  return candidate.slice(firstBrace, lastBrace + 1);
-}
+  const firstObject = text.match(/\{[\s\S]*\}/);
+  if (firstObject?.[0]) {
+    try {
+      return JSON.parse(firstObject[0]);
+    } catch {
+      return null;
+    }
+  }
 
-function sanitizeAiRecord(record) {
-  return {
-    candidateId: String(record?.candidateId || ""),
-    geminiScore: clamp(Number(record?.geminiScore || 0), 0, 100),
-    geminiConfidence: clamp(Number(record?.geminiConfidence || 0), 0, 100),
-    fitSummary: String(record?.fitSummary || "").trim(),
-    whyRecommended: toArray(record?.whyRecommended)
-      .map((item) => String(item || "").trim())
-      .filter(Boolean)
-      .slice(0, 3)
-  };
+  return null;
 }
 
 function mergeAiRanking(candidateProjects, aiOutput) {
-  const aiRecords = toArray(aiOutput?.evaluations).map(sanitizeAiRecord);
+  const aiRecords = toArray(aiOutput?.rerankedProjects).map(sanitizeAiRecord);
 
   const aiByCandidateId = new Map(
     aiRecords
@@ -193,132 +162,151 @@ function mergeAiRanking(candidateProjects, aiOutput) {
       .map((item) => [item.candidateId, item])
   );
 
-  return candidateProjects.map((project) => {
-    const candidateId = String(project.__candidateId);
-    const ai = aiByCandidateId.get(candidateId);
-
-    if (!ai) {
-      return {
-        ...project,
-        aiEnhanced: false,
-        aiMode: "fallback",
-        aiReason: "No Gemini evaluation returned for this candidate.",
-        geminiScore: 0,
-        geminiConfidence: 0,
-        aiFitSummary:
-          "The Gemini layer was unavailable, so the baseline recommender returned this project.",
-        whyRecommended: project.deterministicSignals.slice(0, 3)
-      };
-    }
+  const enhanced = candidateProjects.map((project, index) => {
+    const ai = aiByCandidateId.get(String(project.__candidateId));
 
     return {
       ...project,
-      aiEnhanced: true,
-      aiMode: "gemini",
-      aiReason: "",
-      geminiScore: ai.geminiScore,
-      geminiConfidence: ai.geminiConfidence,
+      aiEnhanced: Boolean(ai),
+      aiRank: ai?.aiRank ?? index + 1,
+      aiConfidence: ai?.aiConfidence ?? null,
       aiFitSummary:
-        ai.fitSummary ||
-        "Gemini ranked this project as a strong fit for the submitted preferences.",
-      whyRecommended:
-        ai.whyRecommended.length > 0
-          ? ai.whyRecommended
-          : project.deterministicSignals.slice(0, 3)
+        ai?.aiFitSummary ||
+        "AI summary unavailable. Showing deterministic shortlist.",
+      aiReason:
+        ai?.aiReason ||
+        "Gemini was unavailable for this request, so baseline ranking was used.",
+      aiStrengths: ai?.aiStrengths || [],
+      aiConcerns: ai?.aiConcerns || []
     };
+  });
+
+  return enhanced.sort((a, b) => {
+    const aRank = Number.isFinite(Number(a.aiRank)) ? Number(a.aiRank) : 999;
+    const bRank = Number.isFinite(Number(b.aiRank)) ? Number(b.aiRank) : 999;
+
+    if (aRank !== bRank) return aRank - bRank;
+    return (b.score || 0) - (a.score || 0);
   });
 }
 
-function buildGeminiPrompt({ userPreferences, candidateProjects }) {
-  const compactCandidates = candidateProjects.map((project, index) => ({
-    candidateId: String(project.__candidateId || `candidate-${index + 1}`),
-    title: project.title || "",
-    description: project.description || "",
-    difficulty: project.difficulty || "",
-    projectType: project.projectType || "",
-    technologies: toArray(project.technologies).slice(0, 5),
-    categories: toArray(project.categories).slice(0, 4),
-    deterministicScore: round1(project.deterministicScore || 0),
-    deterministicSignals: toArray(project.deterministicSignals).slice(0, 3)
-  }));
+async function callGeminiOnce({ apiKey, model, systemInstruction, userPrompt }) {
+  const endpoint =
+    `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  return `
-Return ONLY valid JSON.
-
-{
-  "evaluations": [
-    {
-      "candidateId": "string",
-      "geminiScore": 0,
-      "geminiConfidence": 0,
-      "fitSummary": "string",
-      "whyRecommended": ["string", "string", "string"]
-    }
-  ]
-}
-
-Rules:
-- Evaluate every candidate exactly once.
-- geminiScore must be 0 to 100.
-- geminiConfidence must be 0 to 100.
-- fitSummary must be under 35 words.
-- whyRecommended must contain exactly 3 short strings.
-- Use only the supplied data.
-- Prefer projects that best match the user's difficulty, project type, interests, and technologies.
-- Do not invent new projects.
-
-Input:
-${JSON.stringify(
-  {
-    userProfile: {
-      skill: userPreferences.skill || "",
-      difficulty: userPreferences.difficulty || "",
-      projectType: userPreferences.projectType || "",
-      languages: toArray(userPreferences.languages),
-      interests: toArray(userPreferences.interests)
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
     },
-    candidates: compactCandidates
-  },
-  null,
-  2
-)}
-`.trim();
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: systemInstruction }]
+      },
+      contents: [
+        {
+          parts: [{ text: userPrompt }]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.15,
+        maxOutputTokens: 900,
+        responseMimeType: "application/json"
+      }
+    })
+  });
+
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`Gemini request failed: ${response.status} ${responseText}`);
+  }
+
+  let json;
+  try {
+    json = JSON.parse(responseText);
+  } catch {
+    throw new Error(`Gemini returned non-JSON HTTP payload: ${responseText}`);
+  }
+
+  const finishReason = json?.candidates?.[0]?.finishReason || "UNKNOWN";
+  const text = extractGeminiText(json);
+
+  console.log(`Gemini ${model} finishReason: ${finishReason}`);
+
+  if (!text) {
+    throw new Error(`Gemini returned no text output. Raw response: ${responseText}`);
+  }
+
+  const parsed = safeJsonParse(text);
+
+  if (!parsed) {
+    throw new Error(`Gemini did not return valid JSON. Raw text: ${text}`);
+  }
+
+  if (!Array.isArray(parsed?.rerankedProjects)) {
+    throw new Error(
+      `Gemini JSON did not include rerankedProjects. Parsed payload: ${JSON.stringify(parsed)}`
+    );
+  }
+
+  return parsed;
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 25000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+async function callGeminiWithRetry({
+  apiKey,
+  model,
+  systemInstruction,
+  userPrompt,
+  maxRetries = 3
+}) {
+  const retryDelays = [1000, 2000, 4000];
+  let lastError;
 
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timer);
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      if (attempt > 0) {
+        console.log(`Retrying Gemini model ${model}, attempt ${attempt + 1}...`);
+      }
+
+      return await callGeminiOnce({
+        apiKey,
+        model,
+        systemInstruction,
+        userPrompt
+      });
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryableGeminiError(error) || attempt === maxRetries) {
+        throw error;
+      }
+
+      const delay = retryDelays[Math.min(attempt, retryDelays.length - 1)];
+      console.warn(`Gemini ${model} overloaded/unavailable. Retrying in ${delay}ms...`);
+      await sleep(delay);
+    }
   }
+
+  throw lastError;
 }
 
 async function rerankWithGemini({ userPreferences, candidateProjects }) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-  const timeoutMs = Math.max(
-    5000,
-    Number.parseInt(process.env.GEMINI_TIMEOUT_MS || "25000", 10) || 25000
-  );
+  const primaryModel = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+  const fallbackModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3-flash-preview";
 
   if (!apiKey) {
     return {
-      projects: candidateProjects.map((project) => ({
+      projects: candidateProjects.map((project, index) => ({
         ...project,
         aiEnhanced: false,
-        aiMode: "fallback",
-        aiReason: "GEMINI_API_KEY missing",
-        geminiScore: 0,
-        geminiConfidence: 0,
-        aiFitSummary:
-          "The Gemini layer was unavailable, so the baseline recommender returned this project.",
-        whyRecommended: project.deterministicSignals.slice(0, 3)
+        aiRank: index + 1,
+        aiConfidence: null,
+        aiFitSummary: "AI summary unavailable. Showing deterministic shortlist.",
+        aiReason: "No GEMINI_API_KEY was provided.",
+        aiStrengths: [],
+        aiConcerns: []
       })),
       aiMeta: {
         enabled: false,
@@ -329,44 +317,86 @@ async function rerankWithGemini({ userPreferences, candidateProjects }) {
     };
   }
 
-  const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent`;
-  const prompt = buildGeminiPrompt({ userPreferences, candidateProjects });
+  const compactCandidates = candidateProjects.map((project, index) => ({
+    candidateId: String(project.__candidateId || `candidate-${index + 1}`),
+    title: project.title,
+    difficulty: project.difficulty,
+    projectType: project.projectType,
+    technologies: toArray(project.technologies).slice(0, 4),
+    categories: toArray(project.categories).slice(0, 4),
+    baselineScore: project.score || 0,
+    shortDescription: String(project.description || "").slice(0, 140)
+  }));
 
-  const response = await fetchWithTimeout(
-    endpoint,
+  const systemInstruction = [
+    "You are an AI reranking layer for a thesis project recommendation system.",
+    "Only rerank the provided candidates.",
+    "Do not invent projects.",
+    "Return concise valid JSON only.",
+    "Keep every string short."
+  ].join(" ");
+
+  const userPrompt = JSON.stringify(
     {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey
-      },
-      body: JSON.stringify({
-        contents: [
+      task: "Rerank these candidates for the user.",
+      rules: [
+        "Prefer best fit on difficulty, project type, technologies, and interests.",
+        "Prefer realistic, demo-friendly scope.",
+        "Keep text very short."
+      ],
+      outputFormat: {
+        rerankedProjects: [
           {
-            role: "user",
-            parts: [{ text: prompt }]
+            candidateId: "string",
+            aiRank: "integer",
+            aiConfidence: "integer 0-100",
+            aiFitSummary: "max 12 words",
+            aiReason: "max 14 words",
+            aiStrengths: ["max 2 items", "max 3 words each"],
+            aiConcerns: ["max 2 items", "max 3 words each"]
           }
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 300
-        }
-      })
+        ]
+      },
+      userProfile: {
+        skill: userPreferences.skill || "",
+        difficulty: userPreferences.difficulty || "",
+        projectType: userPreferences.projectType || "",
+        languages: toArray(userPreferences.languages).slice(0, 4),
+        interests: toArray(userPreferences.interests).slice(0, 4)
+      },
+      candidates: compactCandidates
     },
-    timeoutMs
+    null,
+    2
   );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini request failed: ${response.status} ${errorText}`);
-  }
+  let parsed;
+  let usedModel = primaryModel;
 
-  const json = await response.json();
-  const text = extractGeminiText(json);
-  const parsed = JSON.parse(extractJson(text));
+  try {
+    parsed = await callGeminiWithRetry({
+      apiKey,
+      model: primaryModel,
+      systemInstruction,
+      userPrompt,
+      maxRetries: 3
+    });
+  } catch (primaryError) {
+    console.warn(`Primary Gemini model failed: ${primaryError.message}`);
 
-  if (!Array.isArray(parsed?.evaluations)) {
-    throw new Error("Gemini JSON did not include evaluations.");
+    if (fallbackModel && fallbackModel !== primaryModel) {
+      console.log(`Trying fallback Gemini model: ${fallbackModel}`);
+      parsed = await callGeminiWithRetry({
+        apiKey,
+        model: fallbackModel,
+        systemInstruction,
+        userPrompt,
+        maxRetries: 2
+      });
+      usedModel = fallbackModel;
+    } else {
+      throw primaryError;
+    }
   }
 
   const reranked = mergeAiRanking(candidateProjects, parsed);
@@ -376,16 +406,15 @@ async function rerankWithGemini({ userPreferences, candidateProjects }) {
     aiMeta: {
       enabled: true,
       used: true,
-      model,
-      reason: null
+      model: usedModel
     }
   };
 }
 
 async function buildHybridRecommendations({ userPreferences, shortlistedProjects }) {
   const topK = Math.max(
-    1,
-    Math.min(5, Number.parseInt(process.env.GEMINI_TOP_K || "3", 10) || 3)
+    3,
+    Math.min(6, Number.parseInt(process.env.GEMINI_TOP_K || "4", 10) || 4)
   );
 
   const aiCandidates = shortlistedProjects.slice(0, topK).map((project, index) => ({
@@ -393,17 +422,7 @@ async function buildHybridRecommendations({ userPreferences, shortlistedProjects
     __candidateId: String(project._id || project.id || `candidate-${index + 1}`)
   }));
 
-  const remainingProjects = shortlistedProjects.slice(topK).map((project) => ({
-    ...project,
-    aiEnhanced: false,
-    aiMode: "deterministic_extension",
-    aiReason: "Not sent to Gemini; deterministic extension of result list.",
-    geminiScore: 0,
-    geminiConfidence: 0,
-    aiFitSummary:
-      "This result extends the list beyond the Gemini-ranked shortlist and comes from deterministic scoring.",
-    whyRecommended: project.deterministicSignals.slice(0, 3)
-  }));
+  const remainingProjects = shortlistedProjects.slice(topK);
 
   try {
     const hybrid = await rerankWithGemini({
@@ -419,22 +438,26 @@ async function buildHybridRecommendations({ userPreferences, shortlistedProjects
       aiMeta: hybrid.aiMeta
     };
   } catch (error) {
+    console.error("Gemini rerank error:", error.message);
+
     return {
-      projects: shortlistedProjects.map((project) => ({
-        ...project,
-        aiEnhanced: false,
-        aiMode: "fallback",
-        aiReason: error.message,
-        geminiScore: 0,
-        geminiConfidence: 0,
-        aiFitSummary:
-          "The Gemini layer was unavailable, so the baseline recommender returned this project.",
-        whyRecommended: project.deterministicSignals.slice(0, 3)
-      })),
+      projects: [
+        ...aiCandidates.map(({ __candidateId, ...project }, index) => ({
+          ...project,
+          aiEnhanced: false,
+          aiRank: index + 1,
+          aiConfidence: null,
+          aiFitSummary: "AI summary unavailable. Showing deterministic shortlist.",
+          aiReason: "Gemini was unavailable, so baseline ranking was used.",
+          aiStrengths: [],
+          aiConcerns: []
+        })),
+        ...remainingProjects
+      ],
       aiMeta: {
         enabled: true,
         used: false,
-        model: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
+        model: process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview",
         reason: error.message
       }
     };
