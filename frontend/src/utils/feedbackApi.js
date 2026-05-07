@@ -1,80 +1,84 @@
-const FEEDBACK_ENDPOINT = "/feedback";
+const API_BASE_URL =
+  process.env.REACT_APP_API_BASE_URL?.replace(/\/+$/, "") ||
+  "http://127.0.0.1:5000";
 
-export function getProjectFeedbackId(project) {
-  return String(
-    project?._id ||
-      project?.id ||
-      project?.slug ||
-      project?.title ||
-      "unknown-project"
-  );
+const FEEDBACK_ENDPOINT = `${API_BASE_URL}/feedback`;
+
+async function parseJsonSafe(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
 }
 
-export function feedbackDocsToMap(feedbackDocs = []) {
-  return feedbackDocs.reduce((acc, doc) => {
-    acc[String(doc.projectKey)] = {
-      reaction: doc.reaction || null,
-      note: doc.note || "",
-      updatedAt: doc.updatedAt || null
-    };
-    return acc;
-  }, {});
+export async function submitRecommendationFeedback(payload) {
+  let response;
+
+  try {
+    response = await fetch(FEEDBACK_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+  } catch (networkError) {
+    console.error("[submitRecommendationFeedback] Network error:", networkError);
+    throw new Error("Could not submit feedback.");
+  }
+
+  const data = await parseJsonSafe(response);
+
+  if (!response.ok) {
+    throw new Error(data?.error || "Failed to submit feedback.");
+  }
+
+  return data;
+}
+
+export async function fetchRecommendationFeedbackSummary() {
+  let response;
+
+  try {
+    response = await fetch(`${FEEDBACK_ENDPOINT}/summary`);
+  } catch (networkError) {
+    console.error(
+      "[fetchRecommendationFeedbackSummary] Network error:",
+      networkError
+    );
+    throw new Error("Could not fetch feedback summary.");
+  }
+
+  const data = await parseJsonSafe(response);
+
+  if (!response.ok) {
+    throw new Error(data?.error || "Failed to fetch feedback summary.");
+  }
+
+  return Array.isArray(data) ? data : [];
 }
 
 export async function fetchFeedbackMap() {
-  const response = await fetch(FEEDBACK_ENDPOINT);
+  const summary = await fetchRecommendationFeedbackSummary();
 
-  if (!response.ok) {
-    throw new Error("Failed to load feedback.");
-  }
+  return summary.reduce((acc, item) => {
+    const projectId = String(item?._id || "");
 
-  const docs = await response.json();
-  return feedbackDocsToMap(Array.isArray(docs) ? docs : []);
-}
+    if (!projectId) return acc;
 
-export async function saveProjectFeedback(project, patch = {}) {
-  const payload = {
-    projectKey: getProjectFeedbackId(project),
-    projectId: String(project?._id || project?.id || ""),
-    title: String(project?.title || "Untitled Project"),
-    reaction:
-      patch?.reaction === "up" || patch?.reaction === "down"
-        ? patch.reaction
-        : null,
-    note: typeof patch?.note === "string" ? patch.note : "",
-    score:
-      typeof project?.score === "number"
-        ? project.score
-        : Number(project?.score || 0),
-    aiEnhanced: Boolean(project?.aiEnhanced),
-    aiConfidence: Number.isFinite(Number(project?.aiConfidence))
-      ? Number(project.aiConfidence)
-      : null,
-    difficulty: String(project?.difficulty || ""),
-    projectType: String(project?.projectType || "")
-  };
+    acc[projectId] = {
+      projectId,
+      projectTitle: item?.projectTitle || "",
+      projectType: item?.projectType || "",
+      totalResponses: Number(item?.totalFeedback || 0),
+      helpfulCount: Number(item?.helpfulCount || 0),
+      notHelpfulCount: Number(item?.notHelpfulCount || 0),
+      favoriteCount: Number(item?.favoriteCount || 0),
+      avgScore: Number(item?.avgScore || 0),
+      avgGeminiConfidence: Number(item?.avgGeminiConfidence || 0)
+    };
 
-  const response = await fetch(`${FEEDBACK_ENDPOINT}/upsert`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data?.error || "Failed to save feedback.");
-  }
-
-  const saved = await response.json();
-
-  return {
-    key: String(saved.projectKey),
-    feedback: {
-      reaction: saved.reaction || null,
-      note: saved.note || "",
-      updatedAt: saved.updatedAt || null
-    }
-  };
+    return acc;
+  }, {});
 }

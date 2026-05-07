@@ -1,3 +1,4 @@
+// frontend/src/pages/ResultsPage.js
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -8,6 +9,7 @@ import {
 } from "framer-motion";
 import ProjectCard from "../components/ProjectCard";
 import ProjectModal from "../components/ProjectModal";
+import RecommendationFeedbackBar from "../components/RecommendationFeedbackBar";
 import LoadingScreen from "../components/LoadingScreen";
 import {
   fetchRecommendations,
@@ -44,6 +46,7 @@ function ResultsPage() {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [gridKey, setGridKey] = useState(0);
+  const [savedPreferences, setSavedPreferences] = useState(null);
 
   const heroRef = useRef(null);
   const autoRetryRef = useRef(false);
@@ -69,6 +72,7 @@ function ResultsPage() {
 
       saveRecommendations(freshProjects);
       setProjects(freshProjects);
+      setSavedPreferences(prefs);
       setGridKey((prev) => prev + 1);
 
       const anyGemini = freshProjects.some((item) => item?.geminiAvailable === true);
@@ -90,6 +94,10 @@ function ResultsPage() {
   useEffect(() => {
     const saved = getSavedRecommendations();
     const prefs = getSavedPreferences();
+
+    if (prefs) {
+      setSavedPreferences(prefs);
+    }
 
     if (!saved.length) {
       return;
@@ -264,6 +272,12 @@ function ResultsPage() {
                         </span>
                       ))}
                     </div>
+
+                    <RecommendationFeedbackBar
+                      project={topProject}
+                      preferences={savedPreferences}
+                      sourcePage="top_match"
+                    />
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">

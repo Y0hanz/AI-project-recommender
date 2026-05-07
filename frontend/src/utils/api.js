@@ -4,78 +4,6 @@ const API_BASE_URL =
 
 const RECOMMEND_ENDPOINT = `${API_BASE_URL}/recommend`;
 
-function round1(value) {
-  return Math.round(Number(value || 0) * 10) / 10;
-}
-
-function toArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function normalizeProject(project = {}, index = 0) {
-  const aiEnhanced = project.aiEnhanced === true || project.geminiAvailable === true;
-
-  const rawScore = Number(project.score || project.deterministicScore || 0);
-  const baselineDisplayScore = rawScore <= 10 ? rawScore * 10 : rawScore;
-
-  const aiConfidence = Number(
-    project.aiConfidence ?? project.geminiConfidence ?? 0
-  );
-
-  const finalScore = aiEnhanced
-    ? round1(baselineDisplayScore * 0.45 + aiConfidence * 0.55)
-    : round1(baselineDisplayScore);
-
-  const fitSummary =
-    project.aiFitSummary ||
-    project.geminiFitSummary ||
-    project.fitSummary ||
-    "No AI fit summary available.";
-
-  const whyRecommended =
-    toArray(project.whyRecommended).length > 0
-      ? toArray(project.whyRecommended)
-      : toArray(project.aiStrengths).length > 0
-        ? toArray(project.aiStrengths)
-        : toArray(project.deterministicSignals).slice(0, 3);
-
-  const fallbackReason =
-    project.aiReason ||
-    project.insightSnapshot?.fallbackReason ||
-    "Fallback mode is active.";
-
-  return {
-    ...project,
-
-    // unified UI shape
-    score: finalScore,
-    geminiAvailable: aiEnhanced,
-    geminiConfidence: aiEnhanced ? aiConfidence : 0,
-    geminiFitSummary: fitSummary,
-    fitSummary,
-    whyRecommended,
-
-    insightSnapshot: {
-      mode: aiEnhanced ? "gemini_assisted" : "deterministic_fallback",
-      geminiConfidence: `${Math.round(aiEnhanced ? aiConfidence : 0)}%`,
-      topSignals: whyRecommended,
-      fallbackReason: aiEnhanced ? "" : fallbackReason
-    },
-
-    explanationLayer: {
-      mode: aiEnhanced ? "gemini_assisted" : "deterministic_fallback",
-      fitSummary,
-      whyRecommended
-    },
-
-    // keep rank info for sorting
-    uiRank:
-      Number.isFinite(Number(project.aiRank)) && Number(project.aiRank) > 0
-        ? Number(project.aiRank)
-        : index + 1
-  };
-}
-
 async function parseJsonSafe(response) {
   try {
     return await response.json();
@@ -123,7 +51,7 @@ export async function fetchRecommendations(payload) {
     throw new Error("Backend returned an unexpected response format.");
   }
 
-  return data.map((project, index) => normalizeProject(project, index));
+  return data;
 }
 
 export function savePreferences(payload) {

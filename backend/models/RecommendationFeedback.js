@@ -8,51 +8,88 @@ const recommendationFeedbackSchema = new mongoose.Schema(
       unique: true,
       index: true
     },
-    projectId: {
-      type: String,
-      default: "",
-      index: true
-    },
-    title: {
+
+    sessionId: {
       type: String,
       required: true,
-      trim: true
+      index: true
     },
-    reaction: {
+    sourcePage: {
       type: String,
-      enum: ["up", "down", null],
+      enum: ["top_match", "results_card", "project_modal"],
+      required: true
+    },
+    feedbackType: {
+      type: String,
+      enum: ["helpful", "not_helpful", "favorite"],
+      required: true
+    },
+    comment: {
+      type: String,
+      default: ""
+    },
+
+    projectId: {
+      type: String,
+      required: true,
+      index: true
+    },
+    projectTitle: {
+      type: String,
+      required: true
+    },
+    projectType: {
+      type: String,
+      default: ""
+    },
+    technologies: {
+      type: [String],
+      default: []
+    },
+
+    uiRank: {
+      type: Number,
       default: null
-    },
-    note: {
-      type: String,
-      default: "",
-      trim: true
     },
     score: {
       type: Number,
       default: 0
     },
-    aiEnhanced: {
+    geminiAvailable: {
       type: Boolean,
       default: false
     },
-    aiConfidence: {
+    geminiConfidence: {
       type: Number,
-      default: null
+      default: 0
     },
-    difficulty: {
+    geminiFitSummary: {
       type: String,
       default: ""
     },
-    projectType: {
-      type: String,
-      default: ""
+    whyRecommended: {
+      type: [String],
+      default: []
+    },
+
+    userPreferences: {
+      skill: { type: String, default: "" },
+      difficulty: { type: String, default: "" },
+      projectType: { type: String, default: "" },
+      interests: { type: [String], default: [] },
+      languages: { type: [String], default: [] }
     }
   },
   {
     timestamps: true
   }
 );
+
+recommendationFeedbackSchema.index({
+  projectId: 1,
+  feedbackType: 1,
+  createdAt: -1
+});
 
 module.exports = mongoose.model(
   "RecommendationFeedback",
