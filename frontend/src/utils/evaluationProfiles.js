@@ -23,7 +23,7 @@ export const evaluationProfiles = [
       skill: "beginner",
       difficulty: "easy",
       interests: ["ai", "machine learning", "data science"],
-      projectType: "desktop application",
+      projectType: "ai tool",
       languages: ["python"]
     }
   },
@@ -49,7 +49,7 @@ export const evaluationProfiles = [
       skill: "advanced",
       difficulty: "hard",
       interests: ["cybersecurity", "networks", "systems"],
-      projectType: "web application",
+      projectType: "research project",
       languages: ["python", "javascript", "c++"]
     }
   },
@@ -61,8 +61,8 @@ export const evaluationProfiles = [
     payload: {
       skill: "intermediate",
       difficulty: "medium",
-      interests: ["games", "3d", "simulation"],
-      projectType: "desktop application",
+      interests: ["games", "game development", "simulation"],
+      projectType: "game",
       languages: ["c#", "unity"]
     }
   },
@@ -74,8 +74,8 @@ export const evaluationProfiles = [
     payload: {
       skill: "intermediate",
       difficulty: "medium",
-      interests: ["data visualization", "analytics", "dashboards"],
-      projectType: "web application",
+      interests: ["data visualization", "analytics", "dashboard"],
+      projectType: "data dashboard",
       languages: ["javascript", "react", "node.js"]
     }
   },
@@ -101,7 +101,7 @@ export const evaluationProfiles = [
       skill: "intermediate",
       difficulty: "medium",
       interests: ["education", "ai", "productivity"],
-      projectType: "web application",
+      projectType: "ai tool",
       languages: ["javascript", "python"]
     }
   }

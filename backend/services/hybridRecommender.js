@@ -5,7 +5,6 @@ const {
   expandProject,
   expandUserPreferences,
   overlapDetails,
-  overlapCount,
   overlapRatio
 } = require("./taxonomy");
 
@@ -19,8 +18,30 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value || 0)));
 }
 
+function normalizePercent(value, fallback = 0) {
+  const number = Number(value ?? fallback ?? 0);
+
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+
+  // Gemini may return 0.9 instead of 90.
+  // Your app expects 0–100 percentages.
+  if (number > 0 && number <= 1) {
+    return clamp(number * 100, 0, 100);
+  }
+
+  return clamp(number, 0, 100);
+}
+
 function shuffleArray(items = []) {
   return [...items].sort(() => Math.random() - 0.5);
+}
+
+function asObjectArray(value) {
+  return Array.isArray(value)
+    ? value.filter((item) => item && typeof item === "object")
+    : [];
 }
 
 function buildDeterministicSignals({
@@ -141,15 +162,24 @@ function pickBaselineWindow(scoredProjects = []) {
     (a, b) => Number(b.deterministicScore || 0) - Number(a.deterministicScore || 0)
   );
 
-  const positive = sorted.filter((project) => Number(project.deterministicScore || 0) > 0);
+  const positive = sorted.filter(
+    (project) => Number(project.deterministicScore || 0) > 0
+  );
 
   if (positive.length >= 10) {
     return positive.slice(0, 10);
   }
 
   if (positive.length > 0) {
+    const positiveIds = new Set(
+      positive.map((project) => String(project._id || project.id || project.title))
+    );
+
     const rest = sorted
-      .filter((project) => !positive.includes(project))
+      .filter(
+        (project) =>
+          !positiveIds.has(String(project._id || project.id || project.title))
+      )
       .slice(0, 10 - positive.length);
 
     return [...positive, ...rest];
@@ -187,10 +217,25 @@ function extractJson(text) {
 }
 
 function sanitizeAiRecord(record) {
+  const rawScore =
+    record?.geminiScore ??
+    record?.score ??
+    record?.aiScore ??
+    0;
+
+  const rawConfidence =
+    record?.geminiConfidence ??
+    record?.confidence ??
+    record?.aiConfidence ??
+    rawScore;
+
+  const geminiScore = normalizePercent(rawScore, 0);
+  const geminiConfidence = normalizePercent(rawConfidence, geminiScore);
+
   return {
     candidateId: safeString(record?.candidateId),
-    geminiScore: clamp(record?.geminiScore, 0, 100),
-    geminiConfidence: clamp(record?.geminiConfidence, 0, 100),
+    geminiScore,
+    geminiConfidence,
     fitSummary: safeString(record?.fitSummary),
     whyRecommended: toArray(record?.whyRecommended)
       .map((item) => safeString(item))
@@ -200,7 +245,7 @@ function sanitizeAiRecord(record) {
 }
 
 function mergeAiRanking(candidateProjects, aiOutput) {
-  const aiRecords = toArray(aiOutput?.evaluations).map(sanitizeAiRecord);
+  const aiRecords = asObjectArray(aiOutput?.evaluations).map(sanitizeAiRecord);
 
   const aiByCandidateId = new Map(
     aiRecords
@@ -275,64 +320,58 @@ function buildGeminiPrompt({ userPreferences, candidateProjects }) {
     return {
       candidateId: String(project.__candidateId || `candidate-${index + 1}`),
       title: project.title || "",
-      description: project.description || "",
       difficulty: project.difficulty || "",
       normalizedDifficulty: expandedProject.difficulty,
       projectType: project.projectType || "",
       normalizedProjectType: expandedProject.projectType,
-      technologies: toArray(project.technologies).slice(0, 6),
-      expandedTechnologies: expandedProject.technologies.slice(0, 10),
+      technologies: toArray(project.technologies).slice(0, 5),
       categories: toArray(project.categories).slice(0, 5),
-      expandedCategories: expandedProject.categories.slice(0, 10),
-      baselineScore: round1(project.deterministicScore || 0),
-      deterministicSignals: toArray(project.deterministicSignals).slice(0, 5)
+      baselineScore: round1(project.deterministicScore || 0)
     };
   });
 
   return `
-Return ONLY valid JSON.
+Return compact valid JSON only.
 
-Schema:
+Required shape:
 {
   "evaluations": [
     {
       "candidateId": "string",
       "geminiScore": 0,
       "geminiConfidence": 0,
-      "fitSummary": "string",
-      "whyRecommended": ["string", "string", "string"]
+      "fitSummary": "short sentence",
+      "whyRecommended": ["short reason", "short reason", "short reason"]
     }
   ]
 }
 
 Rules:
-- Evaluate every candidate exactly once.
-- geminiScore must be 0 to 100.
-- geminiConfidence must be 0 to 100.
-- fitSummary must be under 24 words.
-- whyRecommended must contain exactly 3 short strings.
-- Strongly reward direct matches on difficulty, project type, interests, and technologies.
-- Penalize candidates from unrelated domains.
-- Do not invent projects.
-- Do not add markdown.
-- Do not add commentary outside JSON.
+- Evaluate every candidate once.
+- Use candidateId exactly.
+- Scores must be 0 to 100.
+- If using decimal confidence, 0.9 means 90%.
+- fitSummary under 18 words.
+- Each whyRecommended item under 8 words.
+- No markdown.
+- No extra text.
 
-Input:
+User:
 ${JSON.stringify(
   {
-    userProfile: {
-      raw: userPreferences,
-      normalized: expandedPrefs
-    },
-    candidates: compactCandidates
+    raw: userPreferences,
+    normalized: expandedPrefs
   },
   null,
   2
 )}
+
+Candidates:
+${JSON.stringify(compactCandidates, null, 2)}
 `.trim();
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 35000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 45000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -347,6 +386,11 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 35000) {
 }
 
 function buildGeminiRequestBody(prompt) {
+  const maxOutputTokens = Math.max(
+    800,
+    Number.parseInt(process.env.GEMINI_MAX_OUTPUT_TOKENS || "1600", 10) || 1600
+  );
+
   return {
     contents: [
       {
@@ -356,7 +400,7 @@ function buildGeminiRequestBody(prompt) {
     ],
     generationConfig: {
       temperature: 0.1,
-      maxOutputTokens: 500,
+      maxOutputTokens,
       responseMimeType: "application/json",
       responseSchema: {
         type: "object",
@@ -417,18 +461,32 @@ async function callGeminiModel({ model, apiKey, prompt, timeoutMs }) {
 
   console.log(`Gemini ${model} finishReason: ${finishReason}`);
 
+  if (finishReason === "MAX_TOKENS") {
+    throw new Error(
+      "Gemini response was cut off because maxOutputTokens was too low."
+    );
+  }
+
   const text = extractGeminiText(json);
 
+  let parsed;
+
   try {
-    return JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch {
-    return JSON.parse(extractJson(text));
+    parsed = JSON.parse(extractJson(text));
   }
+
+  if (!Array.isArray(parsed?.evaluations)) {
+    throw new Error("Gemini JSON did not include evaluations.");
+  }
+
+  return parsed;
 }
 
 function getGeminiModelList() {
-  const primary = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-  const fallback = process.env.GEMINI_FALLBACK_MODEL || "gemini-3-flash-preview";
+  const primary = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+  const fallback = process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash-lite";
 
   return [...new Set([primary, fallback].filter(Boolean))];
 }
@@ -437,7 +495,7 @@ async function rerankWithGemini({ userPreferences, candidateProjects }) {
   const apiKey = process.env.GEMINI_API_KEY;
   const timeoutMs = Math.max(
     8000,
-    Number.parseInt(process.env.GEMINI_TIMEOUT_MS || "35000", 10) || 35000
+    Number.parseInt(process.env.GEMINI_TIMEOUT_MS || "45000", 10) || 45000
   );
 
   if (!apiKey) {
@@ -478,10 +536,6 @@ async function rerankWithGemini({ userPreferences, candidateProjects }) {
         timeoutMs
       });
 
-      if (!Array.isArray(parsed?.evaluations)) {
-        throw new Error("Gemini JSON did not include evaluations.");
-      }
-
       const reranked = mergeAiRanking(candidateProjects, parsed);
 
       return {
@@ -505,7 +559,7 @@ async function rerankWithGemini({ userPreferences, candidateProjects }) {
 async function buildHybridRecommendations({ userPreferences, shortlistedProjects }) {
   const topK = Math.max(
     1,
-    Math.min(5, Number.parseInt(process.env.GEMINI_TOP_K || "4", 10) || 4)
+    Math.min(3, Number.parseInt(process.env.GEMINI_TOP_K || "3", 10) || 3)
   );
 
   const aiCandidates = shortlistedProjects.slice(0, topK).map((project, index) => ({
@@ -562,7 +616,7 @@ async function buildHybridRecommendations({ userPreferences, shortlistedProjects
     const aiMeta = {
       enabled: true,
       used: false,
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
+      model: process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview",
       reason: error?.message || "Unknown Gemini error"
     };
 
