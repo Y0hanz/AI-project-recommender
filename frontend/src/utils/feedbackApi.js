@@ -1,84 +1,85 @@
-const API_BASE_URL =
-  process.env.REACT_APP_API_BASE_URL?.replace(/\/+$/, "") ||
-  "http://127.0.0.1:5000";
+// frontend/src/utils/feedbackApi.js
+import { API_BASE_URL } from "./api";
 
 const FEEDBACK_ENDPOINT = `${API_BASE_URL}/feedback`;
+const FEEDBACK_SUMMARY_ENDPOINT = `${API_BASE_URL}/feedback/summary`;
 
-async function parseJsonSafe(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
+async function parseJsonSafely(response) {
+  return response.json().catch(() => ({}));
+}
+
+function buildUrlWithParams(baseUrl, params = {}) {
+  const url = new URL(baseUrl);
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      url.searchParams.set(key, String(value).trim());
+    }
+  });
+
+  return url.toString();
 }
 
 export async function submitRecommendationFeedback(payload) {
-  let response;
+  const response = await fetch(FEEDBACK_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
 
-  try {
-    response = await fetch(FEEDBACK_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-  } catch (networkError) {
-    console.error("[submitRecommendationFeedback] Network error:", networkError);
-    throw new Error("Could not submit feedback.");
-  }
-
-  const data = await parseJsonSafe(response);
+  const data = await parseJsonSafely(response);
 
   if (!response.ok) {
-    throw new Error(data?.error || "Failed to submit feedback.");
+    throw new Error(data?.error || `Failed to save feedback. Status ${response.status}`);
   }
 
   return data;
 }
 
-export async function fetchRecommendationFeedbackSummary() {
-  let response;
+export async function fetchRecommendationFeedbackSummary(options = {}) {
+  const url = buildUrlWithParams(FEEDBACK_SUMMARY_ENDPOINT, {
+    runId: options.runId
+  });
 
-  try {
-    response = await fetch(`${FEEDBACK_ENDPOINT}/summary`);
-  } catch (networkError) {
-    console.error(
-      "[fetchRecommendationFeedbackSummary] Network error:",
-      networkError
-    );
-    throw new Error("Could not fetch feedback summary.");
-  }
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
 
-  const data = await parseJsonSafe(response);
+  const data = await parseJsonSafely(response);
 
   if (!response.ok) {
-    throw new Error(data?.error || "Failed to fetch feedback summary.");
+    throw new Error(
+      data?.error || `Failed to load feedback summary. Status ${response.status}`
+    );
   }
 
-  return Array.isArray(data) ? data : [];
+  return data;
 }
 
-export async function fetchFeedbackMap() {
-  const summary = await fetchRecommendationFeedbackSummary();
+export async function fetchRecommendationFeedbackList(options = {}) {
+  const url = buildUrlWithParams(FEEDBACK_ENDPOINT, {
+    runId: options.runId
+  });
 
-  return summary.reduce((acc, item) => {
-    const projectId = String(item?._id || "");
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
 
-    if (!projectId) return acc;
+  const data = await parseJsonSafely(response);
 
-    acc[projectId] = {
-      projectId,
-      projectTitle: item?.projectTitle || "",
-      projectType: item?.projectType || "",
-      totalResponses: Number(item?.totalFeedback || 0),
-      helpfulCount: Number(item?.helpfulCount || 0),
-      notHelpfulCount: Number(item?.notHelpfulCount || 0),
-      favoriteCount: Number(item?.favoriteCount || 0),
-      avgScore: Number(item?.avgScore || 0),
-      avgGeminiConfidence: Number(item?.avgGeminiConfidence || 0)
-    };
+  if (!response.ok) {
+    throw new Error(
+      data?.error || `Failed to load feedback list. Status ${response.status}`
+    );
+  }
 
-    return acc;
-  }, {});
+  return data;
 }

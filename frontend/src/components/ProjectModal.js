@@ -1,227 +1,265 @@
-import { motion } from "framer-motion";
+// frontend/src/components/ProjectModal.js
 
-const overlay = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1 },
-  exit: { opacity: 0 }
-};
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
-const modal = {
-  hidden: { opacity: 0, y: 30, scale: 0.985 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    scale: 1,
-    transition: {
-      duration: 0.38,
-      ease: [0.22, 1, 0.36, 1]
-    }
-  },
-  exit: {
-    opacity: 0,
-    y: 18,
-    scale: 0.99,
-    transition: {
-      duration: 0.22
-    }
-  }
-};
+function safeString(value) {
+  return String(value || "").trim();
+}
+
+function numberValue(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getDisplayTitle(project = {}) {
+  return (
+    safeString(project.displayTitle) ||
+    safeString(project.personalizedTitle) ||
+    safeString(project.title) ||
+    "Untitled Project"
+  );
+}
+
+function getBaseTitle(project = {}) {
+  return (
+    safeString(project.baseTitle) ||
+    safeString(project.title) ||
+    "Untitled Project"
+  );
+}
+
+function getDisplayBrief(project = {}) {
+  return (
+    safeString(project.displayBrief) ||
+    safeString(project.personalizedBrief) ||
+    safeString(project.description) ||
+    "No project description available."
+  );
+}
+
+function getPortfolioAngle(project = {}) {
+  return (
+    safeString(project.portfolioAngleDisplay) ||
+    safeString(project.portfolioAngle) ||
+    safeString(project.geminiFitSummary) ||
+    safeString(project.fitSummary) ||
+    "No portfolio angle available."
+  );
+}
+
+function getFitSummary(project = {}) {
+  return (
+    safeString(project.fitSummaryDisplay) ||
+    safeString(project.geminiFitSummary) ||
+    safeString(project.fitSummary) ||
+    safeString(project.aiFitSummary) ||
+    "No fit summary available."
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <section className="rounded-3xl border border-white/10 bg-black/20 p-5">
+      <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-white/38">
+        {title}
+      </p>
+      {children}
+    </section>
+  );
+}
 
 function ProjectModal({ project, onClose }) {
-  const score = Number(project.score || 0);
-  const geminiAvailable = Boolean(project.geminiAvailable);
-  const geminiConfidence = Math.round(Number(project.geminiConfidence || 0));
-  const fitSummary =
-    project.geminiFitSummary ||
-    project.fitSummary ||
-    project.explanationLayer?.fitSummary ||
-    "No AI fit summary was generated.";
+  if (!project) return null;
 
-  const whyRecommended = Array.isArray(project.whyRecommended)
-    ? project.whyRecommended
-    : Array.isArray(project.explanationLayer?.whyRecommended)
-      ? project.explanationLayer.whyRecommended
-      : [];
+  const isGemini = Boolean(project.geminiAvailable || project.aiEnhanced);
 
-  const fallbackReason = project?.insightSnapshot?.fallbackReason || "";
+  const displayTitle = getDisplayTitle(project);
+  const baseTitle = getBaseTitle(project);
+  const showBaseTitle = baseTitle && displayTitle !== baseTitle;
+
+  const displayedScore = numberValue(
+    isGemini ? project.score : project.deterministicScore || project.score
+  );
+
+  const confidence = numberValue(project.geminiConfidence || project.aiConfidence);
+
+  const customFeatures = safeArray(project.customFeatures);
+  const milestones = safeArray(project.suggestedMilestones);
+  const whyRecommended = safeArray(project.whyRecommended);
+  const technologies = safeArray(project.technologies);
 
   return (
-    <motion.div
-      variants={overlay}
-      initial="hidden"
-      animate="visible"
-      exit="exit"
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/72 px-4 py-6 backdrop-blur-lg"
-      onClick={onClose}
-    >
-      <motion.div
-        variants={modal}
-        initial="hidden"
-        animate="visible"
-        exit="exit"
-        onClick={(e) => e.stopPropagation()}
-        className="glass-panel relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[2rem] p-6 shadow-soft sm:p-8"
-      >
-        <div className="absolute inset-0 rounded-[2rem] bg-[radial-gradient(circle_at_top_left,rgba(255,77,0,0.14),transparent_28%),linear-gradient(to_bottom_right,rgba(255,255,255,0.02),transparent_35%)]" />
+    <div className="fixed inset-0 z-[140] overflow-y-auto bg-black/75 px-4 py-8 backdrop-blur-md">
+      <div className="mx-auto max-w-5xl rounded-[2rem] border border-white/10 bg-[#0b0d10] p-6 shadow-soft sm:p-8">
+        <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="mb-3 flex flex-wrap gap-2">
+              <span className="rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-bold text-brand-200">
+                Rank #{project.displayRank || project.uiRank || "—"}
+              </span>
 
-        <button
-          onClick={onClose}
-          className="cursor-target absolute right-4 top-4 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white"
-          aria-label="Close modal"
-        >
-          ✕
-        </button>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold uppercase text-white/45">
+                {project.projectType || "Project"}
+              </span>
 
-        <div className="relative pr-12">
-          <div className="mb-5 flex flex-wrap gap-2">
-            <span className="rounded-full border border-brand-500/25 bg-brand-500/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-brand-300">
-              Detailed Brief
-            </span>
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-bold uppercase ${
+                  isGemini
+                    ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                    : "border-yellow-400/30 bg-yellow-400/10 text-yellow-200"
+                }`}
+              >
+                {isGemini ? "Gemini enhanced" : "Deterministic fallback"}
+              </span>
+            </div>
 
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-white/50">
-              {project.projectType || "Project"}
-            </span>
+            <h2 className="max-w-3xl text-4xl font-black leading-tight text-white sm:text-5xl">
+              {displayTitle}
+            </h2>
 
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-white/50">
-              {project.difficulty || "N/A"}
-            </span>
-
-            <span
-              className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.22em] ${
-                geminiAvailable
-                  ? "border border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
-                  : "border border-amber-400/30 bg-amber-400/10 text-amber-200"
-              }`}
-            >
-              {geminiAvailable ? "Gemini" : "Fallback"}
-            </span>
-          </div>
-
-          <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-            <div>
-              <h2 className="text-3xl font-black leading-tight text-white sm:text-4xl">
-                {project.title}
-              </h2>
-
-              <p className="mt-5 text-sm leading-8 text-white/67 sm:text-base">
-                {project.description}
+            {showBaseTitle ? (
+              <p className="mt-3 text-sm uppercase tracking-[0.18em] text-white/35">
+                Base project: {baseTitle}
               </p>
+            ) : null}
 
-              <div className="mt-8 rounded-3xl border border-white/10 bg-black/25 p-5">
-                <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-white/38">
-                  Gemini Fit Summary
-                </p>
-                <p className="text-sm leading-7 text-white/72">
-                  {fitSummary}
-                </p>
-              </div>
-
-              {!!whyRecommended.length && (
-                <div className="mt-5 rounded-3xl border border-white/10 bg-black/25 p-5">
-                  <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-white/38">
-                    Why Recommended
-                  </p>
-                  <div className="space-y-3">
-                    {whyRecommended.slice(0, 3).map((reason, idx) => (
-                      <div
-                        key={`${reason}-${idx}`}
-                        className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-6 text-white/72"
-                      >
-                        {reason}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-5 rounded-3xl border border-white/10 bg-black/25 p-5">
-                <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-white/38">
-                  Technologies
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {(project.technologies || []).map((tech) => (
-                    <span key={tech} className="tag-pill">
-                      {tech}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {!geminiAvailable && fallbackReason && (
-                <div className="mt-5 rounded-3xl border border-amber-400/25 bg-amber-400/10 p-5">
-                  <p className="mb-2 text-[11px] uppercase tracking-[0.22em] text-amber-200/85">
-                    Fallback Reason
-                  </p>
-                  <p className="text-sm leading-7 text-amber-100/85">
-                    {fallbackReason}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-                <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-white/38">
-                    Match Score
-                  </p>
-                  <p className="mt-3 text-4xl font-black text-white">
-                    {score.toFixed(1)}
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-white/38">
-                    AI Confidence
-                  </p>
-                  <p className="mt-3 text-4xl font-black text-white">
-                    {geminiConfidence}%
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-white/38">
-                    Difficulty
-                  </p>
-                  <p className="mt-3 text-lg font-semibold capitalize text-white">
-                    {project.difficulty || "Not specified"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-                <p className="mb-3 text-[10px] uppercase tracking-[0.22em] text-white/38">
-                  Key Features
-                </p>
-                <p className="text-sm leading-7 text-white/66">
-                  {project.features || "No additional feature breakdown was provided for this project."}
-                </p>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-                <p className="mb-3 text-[10px] uppercase tracking-[0.22em] text-white/38">
-                  Learning Path
-                </p>
-                <p className="text-sm leading-7 text-white/66">
-                  {project.learning || "No learning path was defined yet. You can frame this around architecture, tooling, and implementation depth in your presentation."}
-                </p>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
-                <p className="mb-3 text-[10px] uppercase tracking-[0.22em] text-white/38">
-                  Engine Status
-                </p>
-                <p className="text-sm leading-7 text-white/66">
-                  {geminiAvailable
-                    ? "Gemini enrichment is active for this result."
-                    : "Gemini enrichment was unavailable, so the fallback ranking was used."}
-                </p>
-              </div>
-            </div>
+            <p className="mt-5 max-w-3xl text-base leading-7 text-white/65">
+              {getDisplayBrief(project)}
+            </p>
           </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn-secondary cursor-target shrink-0"
+          >
+            Close
+          </button>
         </div>
-      </motion.div>
-    </motion.div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <Section title={isGemini ? "AI Score" : "Deterministic Fit"}>
+            <p className="text-4xl font-black text-white">
+              {displayedScore.toFixed(1)}
+            </p>
+          </Section>
+
+          <Section title={isGemini ? "AI Confidence" : "AI Personalization"}>
+            {isGemini ? (
+              <p className="text-4xl font-black text-white">
+                {confidence.toFixed(0)}%
+              </p>
+            ) : (
+              <p className="text-3xl font-black text-white/70">Not used</p>
+            )}
+          </Section>
+
+          <Section title="Difficulty">
+            <p className="text-2xl font-black text-white">
+              {project.difficulty || "—"}
+            </p>
+          </Section>
+        </div>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <Section title={isGemini ? "Personalized build brief" : "Project brief"}>
+            <p className="text-sm leading-7 text-white/68">
+              {getDisplayBrief(project)}
+            </p>
+          </Section>
+
+          <Section title="Portfolio angle">
+            <p className="text-sm leading-7 text-white/68">
+              {getPortfolioAngle(project)}
+            </p>
+          </Section>
+        </div>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <Section title="Fit summary">
+            <p className="text-sm leading-7 text-white/68">
+              {getFitSummary(project)}
+            </p>
+          </Section>
+
+          <Section title={isGemini ? "Personalization status" : "Fallback status"}>
+            <p className="text-sm leading-7 text-white/68">
+              {isGemini
+                ? "This recommendation was reranked and reshaped by Gemini using the user's selected preferences and personalization context."
+                : "This recommendation was selected by rule-based deterministic scoring only. Gemini did not personalize this item."}
+            </p>
+          </Section>
+        </div>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <Section title={isGemini ? "Custom features" : "Core features"}>
+            <ul className="space-y-3">
+              {customFeatures.length ? (
+                customFeatures.map((item, index) => (
+                  <li key={`${item}-${index}`} className="text-sm leading-6 text-white/68">
+                    {index + 1}. {item}
+                  </li>
+                ))
+              ) : (
+                <li className="text-sm text-white/50">
+                  No feature breakdown available.
+                </li>
+              )}
+            </ul>
+          </Section>
+
+          <Section title="Suggested milestones">
+            <ul className="space-y-3">
+              {milestones.length ? (
+                milestones.map((item, index) => (
+                  <li key={`${item}-${index}`} className="text-sm leading-6 text-white/68">
+                    {index + 1}. {item}
+                  </li>
+                ))
+              ) : (
+                <li className="text-sm text-white/50">
+                  No milestones available.
+                </li>
+              )}
+            </ul>
+          </Section>
+        </div>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          <Section title="Why recommended">
+            <ul className="space-y-3">
+              {whyRecommended.length ? (
+                whyRecommended.map((item, index) => (
+                  <li key={`${item}-${index}`} className="text-sm leading-6 text-white/68">
+                    {index + 1}. {item}
+                  </li>
+                ))
+              ) : (
+                <li className="text-sm text-white/50">
+                  No explanation available.
+                </li>
+              )}
+            </ul>
+          </Section>
+
+          <Section title="Technologies">
+            <div className="flex flex-wrap gap-2">
+              {technologies.length ? (
+                technologies.map((tech) => (
+                  <span key={tech} className="tag-pill">
+                    {tech}
+                  </span>
+                ))
+              ) : (
+                <p className="text-sm text-white/50">No technologies listed.</p>
+              )}
+            </div>
+          </Section>
+        </div>
+      </div>
+    </div>
   );
 }
 

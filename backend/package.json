@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "seed": "node seed.js",
-    "smoke": "node scripts/smokeTestBackend.js"
+    "smoke": "node scripts/smokeTestBackend.js",
+    "cleanup:smoke": "node scripts/cleanupSmokeData.js"
   },
   "dependencies": {
     "cors": "^2.8.6",

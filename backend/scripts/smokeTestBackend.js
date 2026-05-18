@@ -3,10 +3,12 @@ const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "../../.env") });
 
 const API_BASE_URL = process.env.SMOKE_TEST_API_URL || "http://127.0.0.1:5000";
-
 const DEV_LAB_PASSWORD = process.env.DEV_LAB_PASSWORD || "";
 
+const smokeSessionId = `smoke-test-${Date.now()}`;
+
 const testPayload = {
+  sessionId: smokeSessionId,
   skill: "beginner",
   difficulty: "easy",
   projectType: "web application",
@@ -16,7 +18,8 @@ const testPayload = {
   portfolioGoal: "learn fundamentals",
   timeAvailable: "no preference",
   buildStyle: "no preference",
-  personalContext: "I want a beginner-friendly project that proves frontend and backend basics."
+  personalContext:
+    "I want a beginner-friendly project that proves frontend and backend basics."
 };
 
 function printDivider() {
@@ -146,6 +149,7 @@ async function testRecommendationGeneration() {
   const runId = result.data.runId || result.data.metadata?.runId || "";
 
   assert(runId, "Recommendation route did not return runId.");
+
   assert(
     result.data.metadata?.persisted === true,
     "Recommendation run was not persisted. Expected metadata.persisted = true."
@@ -154,6 +158,7 @@ async function testRecommendationGeneration() {
   const top = recommendations[0];
 
   console.log(`OK: ${recommendations.length} recommendations generated.`);
+  console.log(`Smoke session ID: ${smokeSessionId}`);
   console.log(`Run ID: ${runId}`);
   console.log(`Top recommendation: ${getProjectTitle(top)}`);
   console.log(
@@ -176,6 +181,7 @@ async function testRecommendationRunsList() {
   const result = await request("/recommendation-runs");
 
   assert(result.ok, `Recommendation runs route failed. Status: ${result.status}`);
+
   assert(
     Array.isArray(result.data.runs),
     "Recommendation runs response does not contain runs array."
@@ -191,15 +197,18 @@ async function testRecommendationRunDetail(runId) {
 
   const result = await request(`/recommendation-runs/${runId}`);
 
-  assert(
-    result.ok,
-    `Recommendation run detail failed. Status: ${result.status}`
-  );
+  assert(result.ok, `Recommendation run detail failed. Status: ${result.status}`);
 
   assert(result.data.runId === runId, "Returned runId does not match requested runId.");
+
   assert(
     Array.isArray(result.data.recommendations),
     "Run detail does not include recommendations array."
+  );
+
+  assert(
+    result.data.sessionId === smokeSessionId,
+    "Run detail sessionId does not match smoke sessionId."
   );
 
   console.log(`OK: Loaded run ${runId}.`);
@@ -216,7 +225,7 @@ async function testFeedbackSubmission(runId, project) {
 
   const payload = {
     runId,
-    sessionId: `smoke-test-${Date.now()}`,
+    sessionId: smokeSessionId,
     projectId: project._id || project.id || "",
     projectKey,
     projectTitle,
@@ -243,6 +252,7 @@ async function testFeedbackSubmission(runId, project) {
   });
 
   assert(result.ok, `Feedback submission failed. Status: ${result.status}`);
+
   assert(result.data.ok === true, "Feedback response did not return ok: true.");
 
   console.log(`OK: Feedback saved for "${projectTitle}".`);
@@ -299,6 +309,7 @@ async function main() {
   console.log("");
   console.log("AI Project Recommender Backend Smoke Test");
   console.log(`API: ${API_BASE_URL}`);
+  console.log(`Smoke session: ${smokeSessionId}`);
   console.log("");
 
   try {

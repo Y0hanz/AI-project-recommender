@@ -1,57 +1,53 @@
+// frontend/src/utils/api.js
+
 const API_BASE_URL =
-  process.env.REACT_APP_API_BASE_URL?.replace(/\/+$/, "") ||
-  "http://127.0.0.1:5000";
+  process.env.REACT_APP_API_BASE_URL || "http://127.0.0.1:5000";
 
 const RECOMMEND_ENDPOINT = `${API_BASE_URL}/recommend`;
 
-async function parseJsonSafe(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
 export async function fetchRecommendations(payload) {
-  let response;
+  const response = await fetch(RECOMMEND_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
 
-  try {
-    response = await fetch(RECOMMEND_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-  } catch (networkError) {
-    console.error("[fetchRecommendations] Network error:", networkError);
-    throw new Error(
-      "Could not reach the backend API. Make sure node server.js is running on http://127.0.0.1:5000."
-    );
-  }
-
-  const data = await parseJsonSafe(response);
+  const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    const backendMessage =
-      data?.error ||
-      data?.message ||
-      `Backend request failed with status ${response.status}.`;
-
-    console.error("[fetchRecommendations] Backend error:", {
-      status: response.status,
-      data
-    });
-
-    throw new Error(backendMessage);
+    throw new Error(data?.error || "Failed to fetch recommendations.");
   }
 
-  if (!Array.isArray(data)) {
-    console.error("[fetchRecommendations] Unexpected response shape:", data);
-    throw new Error("Backend returned an unexpected response format.");
+  if (Array.isArray(data)) {
+    localStorage.removeItem("recommendationRunMetadata");
+    return data;
   }
 
-  return data;
+  if (Array.isArray(data.recommendations)) {
+    const runMetadata = {
+      runId: data.runId || data.metadata?.runId || "",
+      generatedAt: data.metadata?.generatedAt || new Date().toISOString(),
+      generatedDateFormatted:
+        data.metadata?.generatedDateFormatted || new Date().toLocaleString(),
+      persisted: Boolean(data.metadata?.persisted),
+      totalRecommendations:
+        data.metadata?.totalRecommendations || data.recommendations.length,
+      geminiRecommendations: data.metadata?.geminiRecommendations || 0,
+      fallbackRecommendations: data.metadata?.fallbackRecommendations || 0,
+      geminiUsed: Boolean(data.metadata?.geminiUsed),
+      geminiModel: data.metadata?.geminiModel || "",
+      geminiReason: data.metadata?.geminiReason || ""
+    };
+
+    localStorage.setItem("recommendationRunMetadata", JSON.stringify(runMetadata));
+
+    return data.recommendations;
+  }
+
+  localStorage.removeItem("recommendationRunMetadata");
+  return [];
 }
 
 export function savePreferences(payload) {
@@ -77,3 +73,17 @@ export function getSavedRecommendations() {
     return [];
   }
 }
+
+export function getSavedRecommendationRunMetadata() {
+  try {
+    return JSON.parse(localStorage.getItem("recommendationRunMetadata")) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function shuffleProjects(projects = []) {
+  return [...projects].sort(() => Math.random() - 0.5);
+}
+
+export { API_BASE_URL };
