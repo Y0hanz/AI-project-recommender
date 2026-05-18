@@ -1,83 +1,111 @@
+// backend/models/RecommendationFeedback.js
 const mongoose = require("mongoose");
 
-const recommendationFeedbackSchema = new mongoose.Schema(
+const RecommendationFeedbackSchema = new mongoose.Schema(
   {
-    projectKey: {
+    runId: {
       type: String,
-      required: true,
-      unique: true,
+      default: "",
       index: true
     },
 
     sessionId: {
       type: String,
-      required: true,
+      default: "",
       index: true
-    },
-    sourcePage: {
-      type: String,
-      enum: ["top_match", "results_card", "project_modal"],
-      required: true
-    },
-    feedbackType: {
-      type: String,
-      enum: ["helpful", "not_helpful", "favorite"],
-      required: true
-    },
-    comment: {
-      type: String,
-      default: ""
     },
 
     projectId: {
       type: String,
+      default: ""
+    },
+
+    projectKey: {
+      type: String,
       required: true,
       index: true
     },
+
     projectTitle: {
       type: String,
       required: true
     },
+
+    baseTitle: {
+      type: String,
+      default: ""
+    },
+
+    personalizedTitle: {
+      type: String,
+      default: ""
+    },
+
     projectType: {
       type: String,
       default: ""
     },
-    technologies: {
-      type: [String],
-      default: []
+
+    difficulty: {
+      type: String,
+      default: ""
     },
 
-    uiRank: {
-      type: Number,
-      default: null
+    feedbackType: {
+      type: String,
+      enum: ["helpful", "not_relevant", "favorite"],
+      required: true,
+      index: true
     },
+
+    note: {
+      type: String,
+      default: ""
+    },
+
     score: {
       type: Number,
       default: 0
     },
-    geminiAvailable: {
-      type: Boolean,
-      default: false
+
+    deterministicScore: {
+      type: Number,
+      default: 0
     },
+
+    geminiScore: {
+      type: Number,
+      default: 0
+    },
+
+    aiConfidence: {
+      type: Number,
+      default: 0
+    },
+
     geminiConfidence: {
       type: Number,
       default: 0
     },
-    geminiFitSummary: {
-      type: String,
-      default: ""
+
+    aiEnhanced: {
+      type: Boolean,
+      default: false
     },
-    whyRecommended: {
-      type: [String],
-      default: []
+
+    geminiAvailable: {
+      type: Boolean,
+      default: false
     },
 
     userPreferences: {
-      skill: { type: String, default: "" },
-      difficulty: { type: String, default: "" },
-      projectType: { type: String, default: "" },
-      interests: { type: [String], default: [] },
-      languages: { type: [String], default: [] }
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+
+    recommendationSnapshot: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
     }
   },
   {
@@ -85,13 +113,11 @@ const recommendationFeedbackSchema = new mongoose.Schema(
   }
 );
 
-recommendationFeedbackSchema.index({
-  projectId: 1,
-  feedbackType: 1,
-  createdAt: -1
-});
+RecommendationFeedbackSchema.index({ runId: 1, createdAt: -1 });
+RecommendationFeedbackSchema.index({ projectKey: 1, createdAt: -1 });
+RecommendationFeedbackSchema.index({ feedbackType: 1, createdAt: -1 });
 
 module.exports = mongoose.model(
   "RecommendationFeedback",
-  recommendationFeedbackSchema
+  RecommendationFeedbackSchema
 );

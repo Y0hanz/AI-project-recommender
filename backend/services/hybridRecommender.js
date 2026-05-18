@@ -25,8 +25,6 @@ function normalizePercent(value, fallback = 0) {
     return 0;
   }
 
-  // Gemini may return 0.9 instead of 90.
-  // Your app expects 0–100 percentages.
   if (number > 0 && number <= 1) {
     return clamp(number * 100, 0, 100);
   }
@@ -42,6 +40,64 @@ function asObjectArray(value) {
   return Array.isArray(value)
     ? value.filter((item) => item && typeof item === "object")
     : [];
+}
+
+function buildPersonalizationContext(userPreferences = {}) {
+  return {
+    preferredIndustry: safeString(userPreferences.preferredIndustry),
+    portfolioGoal: safeString(userPreferences.portfolioGoal),
+    timeAvailable: safeString(userPreferences.timeAvailable),
+    buildStyle: safeString(userPreferences.buildStyle),
+    personalContext: safeString(userPreferences.personalContext)
+  };
+}
+
+function hasPersonalizationContext(userPreferences = {}) {
+  const context = buildPersonalizationContext(userPreferences);
+  return Object.values(context).some(Boolean);
+}
+
+function fallbackPersonalizedTitle(project = {}) {
+  return safeString(project.title);
+}
+
+function fallbackPersonalizedBrief(project = {}) {
+  return `Build this project as a focused portfolio-ready implementation of ${safeString(
+    project.title
+  )}.`;
+}
+
+function fallbackCustomFeatures(project = {}) {
+  const features = safeString(project.features);
+
+  if (features) {
+    return features
+      .split(/[.;]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 4);
+  }
+
+  return [
+    "Core CRUD workflow",
+    "Clean responsive interface",
+    "Basic analytics or summary view",
+    "Final demo-ready presentation"
+  ];
+}
+
+function fallbackMilestones(project = {}) {
+  return [
+    `Define the scope and data model for ${safeString(project.title)}`,
+    "Build the core screens and backend/API logic",
+    "Add validation, polish, and demo-ready sample data"
+  ];
+}
+
+function fallbackPortfolioAngle(project = {}) {
+  return `Shows practical ability to plan, build, and explain a complete ${safeString(
+    project.projectType || "software"
+  )} project.`;
 }
 
 function buildDeterministicSignals({
@@ -216,7 +272,7 @@ function extractJson(text) {
   return candidate.slice(firstBrace, lastBrace + 1);
 }
 
-function sanitizeAiRecord(record) {
+function sanitizeAiRecord(record, project = {}) {
   const rawScore =
     record?.geminiScore ??
     record?.score ??
@@ -240,25 +296,40 @@ function sanitizeAiRecord(record) {
     whyRecommended: toArray(record?.whyRecommended)
       .map((item) => safeString(item))
       .filter(Boolean)
-      .slice(0, 3)
+      .slice(0, 3),
+
+    personalizedTitle:
+      safeString(record?.personalizedTitle) || fallbackPersonalizedTitle(project),
+    personalizedBrief:
+      safeString(record?.personalizedBrief) || fallbackPersonalizedBrief(project),
+    customFeatures: toArray(record?.customFeatures)
+      .map((item) => safeString(item))
+      .filter(Boolean)
+      .slice(0, 5),
+    suggestedMilestones: toArray(record?.suggestedMilestones)
+      .map((item) => safeString(item))
+      .filter(Boolean)
+      .slice(0, 5),
+    portfolioAngle:
+      safeString(record?.portfolioAngle) || fallbackPortfolioAngle(project)
   };
 }
 
 function mergeAiRanking(candidateProjects, aiOutput) {
-  const aiRecords = asObjectArray(aiOutput?.evaluations).map(sanitizeAiRecord);
+  const rawRecords = asObjectArray(aiOutput?.evaluations);
 
   const aiByCandidateId = new Map(
-    aiRecords
-      .filter((item) => item.candidateId)
-      .map((item) => [item.candidateId, item])
+    rawRecords
+      .filter((item) => safeString(item?.candidateId))
+      .map((item) => [safeString(item.candidateId), item])
   );
 
   return candidateProjects
     .map((project) => {
       const candidateId = String(project.__candidateId);
-      const ai = aiByCandidateId.get(candidateId);
+      const rawAi = aiByCandidateId.get(candidateId);
 
-      if (!ai) {
+      if (!rawAi) {
         return {
           ...project,
           aiEnhanced: false,
@@ -270,9 +341,17 @@ function mergeAiRanking(candidateProjects, aiOutput) {
           aiFitSummary:
             "The Gemini layer did not return an evaluation for this project.",
           whyRecommended: toArray(project.deterministicSignals).slice(0, 3),
-          aiStrengths: toArray(project.deterministicSignals).slice(0, 3)
+          aiStrengths: toArray(project.deterministicSignals).slice(0, 3),
+
+          personalizedTitle: fallbackPersonalizedTitle(project),
+          personalizedBrief: fallbackPersonalizedBrief(project),
+          customFeatures: fallbackCustomFeatures(project),
+          suggestedMilestones: fallbackMilestones(project),
+          portfolioAngle: fallbackPortfolioAngle(project)
         };
       }
+
+      const ai = sanitizeAiRecord(rawAi, project);
 
       return {
         ...project,
@@ -292,7 +371,19 @@ function mergeAiRanking(candidateProjects, aiOutput) {
         aiStrengths:
           ai.whyRecommended.length > 0
             ? ai.whyRecommended
-            : toArray(project.deterministicSignals).slice(0, 3)
+            : toArray(project.deterministicSignals).slice(0, 3),
+
+        personalizedTitle: ai.personalizedTitle,
+        personalizedBrief: ai.personalizedBrief,
+        customFeatures:
+          ai.customFeatures.length > 0
+            ? ai.customFeatures
+            : fallbackCustomFeatures(project),
+        suggestedMilestones:
+          ai.suggestedMilestones.length > 0
+            ? ai.suggestedMilestones
+            : fallbackMilestones(project),
+        portfolioAngle: ai.portfolioAngle
       };
     })
     .sort((a, b) => {
@@ -313,6 +404,7 @@ function mergeAiRanking(candidateProjects, aiOutput) {
 
 function buildGeminiPrompt({ userPreferences, candidateProjects }) {
   const expandedPrefs = expandUserPreferences(userPreferences);
+  const personalization = buildPersonalizationContext(userPreferences);
 
   const compactCandidates = candidateProjects.map((project, index) => {
     const expandedProject = expandProject(project);
@@ -341,7 +433,12 @@ Required shape:
       "geminiScore": 0,
       "geminiConfidence": 0,
       "fitSummary": "short sentence",
-      "whyRecommended": ["short reason", "short reason", "short reason"]
+      "whyRecommended": ["short reason", "short reason", "short reason"],
+      "personalizedTitle": "string",
+      "personalizedBrief": "string",
+      "customFeatures": ["string", "string", "string"],
+      "suggestedMilestones": ["string", "string", "string"],
+      "portfolioAngle": "string"
     }
   ]
 }
@@ -352,7 +449,13 @@ Rules:
 - Scores must be 0 to 100.
 - If using decimal confidence, 0.9 means 90%.
 - fitSummary under 18 words.
-- Each whyRecommended item under 8 words.
+- whyRecommended must contain 3 short strings.
+- personalizedTitle must adapt the base project to the user's personal context.
+- personalizedBrief must be under 35 words.
+- customFeatures must contain 3 to 5 practical features.
+- suggestedMilestones must contain 3 to 5 build milestones.
+- portfolioAngle must explain why this is useful for the user's goal.
+- Do not invent a totally unrelated project.
 - No markdown.
 - No extra text.
 
@@ -360,7 +463,8 @@ User:
 ${JSON.stringify(
   {
     raw: userPreferences,
-    normalized: expandedPrefs
+    normalized: expandedPrefs,
+    personalization
   },
   null,
   2
@@ -387,8 +491,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 45000) {
 
 function buildGeminiRequestBody(prompt) {
   const maxOutputTokens = Math.max(
-    800,
-    Number.parseInt(process.env.GEMINI_MAX_OUTPUT_TOKENS || "1600", 10) || 1600
+    1000,
+    Number.parseInt(process.env.GEMINI_MAX_OUTPUT_TOKENS || "2200", 10) || 2200
   );
 
   return {
@@ -399,7 +503,7 @@ function buildGeminiRequestBody(prompt) {
       }
     ],
     generationConfig: {
-      temperature: 0.1,
+      temperature: 0.25,
       maxOutputTokens,
       responseMimeType: "application/json",
       responseSchema: {
@@ -417,14 +521,30 @@ function buildGeminiRequestBody(prompt) {
                 whyRecommended: {
                   type: "array",
                   items: { type: "string" }
-                }
+                },
+                personalizedTitle: { type: "string" },
+                personalizedBrief: { type: "string" },
+                customFeatures: {
+                  type: "array",
+                  items: { type: "string" }
+                },
+                suggestedMilestones: {
+                  type: "array",
+                  items: { type: "string" }
+                },
+                portfolioAngle: { type: "string" }
               },
               required: [
                 "candidateId",
                 "geminiScore",
                 "geminiConfidence",
                 "fitSummary",
-                "whyRecommended"
+                "whyRecommended",
+                "personalizedTitle",
+                "personalizedBrief",
+                "customFeatures",
+                "suggestedMilestones",
+                "portfolioAngle"
               ]
             }
           }
@@ -511,7 +631,12 @@ async function rerankWithGemini({ userPreferences, candidateProjects }) {
         aiFitSummary:
           "The Gemini layer was unavailable because no API key was configured.",
         whyRecommended: toArray(project.deterministicSignals).slice(0, 3),
-        aiStrengths: toArray(project.deterministicSignals).slice(0, 3)
+        aiStrengths: toArray(project.deterministicSignals).slice(0, 3),
+        personalizedTitle: fallbackPersonalizedTitle(project),
+        personalizedBrief: fallbackPersonalizedBrief(project),
+        customFeatures: fallbackCustomFeatures(project),
+        suggestedMilestones: fallbackMilestones(project),
+        portfolioAngle: fallbackPortfolioAngle(project)
       })),
       aiMeta: {
         enabled: false,
@@ -544,7 +669,8 @@ async function rerankWithGemini({ userPreferences, candidateProjects }) {
           enabled: true,
           used: true,
           model,
-          reason: null
+          reason: null,
+          personalized: hasPersonalizationContext(userPreferences)
         }
       };
     } catch (error) {
@@ -578,7 +704,12 @@ async function buildHybridRecommendations({ userPreferences, shortlistedProjects
     aiFitSummary:
       "This result extends the list beyond the Gemini-ranked shortlist and comes from deterministic scoring.",
     whyRecommended: toArray(project.deterministicSignals).slice(0, 3),
-    aiStrengths: toArray(project.deterministicSignals).slice(0, 3)
+    aiStrengths: toArray(project.deterministicSignals).slice(0, 3),
+    personalizedTitle: fallbackPersonalizedTitle(project),
+    personalizedBrief: fallbackPersonalizedBrief(project),
+    customFeatures: fallbackCustomFeatures(project),
+    suggestedMilestones: fallbackMilestones(project),
+    portfolioAngle: fallbackPortfolioAngle(project)
   }));
 
   try {
@@ -610,14 +741,20 @@ async function buildHybridRecommendations({ userPreferences, shortlistedProjects
       aiFitSummary:
         "The Gemini layer was unavailable, so the baseline recommender returned this project.",
       whyRecommended: toArray(project.deterministicSignals).slice(0, 3),
-      aiStrengths: toArray(project.deterministicSignals).slice(0, 3)
+      aiStrengths: toArray(project.deterministicSignals).slice(0, 3),
+      personalizedTitle: fallbackPersonalizedTitle(project),
+      personalizedBrief: fallbackPersonalizedBrief(project),
+      customFeatures: fallbackCustomFeatures(project),
+      suggestedMilestones: fallbackMilestones(project),
+      portfolioAngle: fallbackPortfolioAngle(project)
     }));
 
     const aiMeta = {
       enabled: true,
       used: false,
       model: process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview",
-      reason: error?.message || "Unknown Gemini error"
+      reason: error?.message || "Unknown Gemini error",
+      personalized: false
     };
 
     console.log("Hybrid AI fallback:", aiMeta);

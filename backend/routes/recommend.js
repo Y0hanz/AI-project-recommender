@@ -1,173 +1,270 @@
 // backend/routes/recommend.js
 const express = require("express");
 const router = express.Router();
+
 const Project = require("../models/Project");
 const {
   scoreBaselineProjects,
   pickBaselineWindow,
   buildHybridRecommendations
 } = require("../services/hybridRecommender");
+const { persistRecommendationRun } = require("../services/recommendationRunService");
 
 function safeString(value) {
   return String(value || "").trim();
 }
 
-function normalizeLowerArray(value) {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => String(item || "").trim().toLowerCase())
-      .filter(Boolean);
-  }
-
-  if (typeof value === "string") {
-    return value
-      .split(",")
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean);
-  }
-
-  return [];
+function toArray(value) {
+  return Array.isArray(value)
+    ? value.map((item) => safeString(item)).filter(Boolean)
+    : [];
 }
 
 function round1(value) {
   return Math.round(Number(value || 0) * 10) / 10;
 }
 
-function toArray(value) {
-  return Array.isArray(value) ? value : [];
+function computeFinalScore(project) {
+  const deterministicScore = Number(project.deterministicScore || project.score || 0);
+  const geminiScore = Number(project.geminiScore || 0);
+
+  if (project.aiEnhanced) {
+    return round1(deterministicScore * 0.45 + geminiScore * 0.55);
+  }
+
+  return round1(deterministicScore);
 }
 
-function buildUnifiedProject(project = {}, index = 0, aiMeta = {}) {
-  const aiEnhanced = project.aiEnhanced === true || project.geminiAvailable === true;
+function normalizePreferencePayload(body = {}) {
+  return {
+    skill: safeString(body.skill),
+    difficulty: safeString(body.difficulty),
+    interests: toArray(body.interests),
+    projectType: safeString(body.projectType),
+    languages: toArray(body.languages),
 
-  const rawScore = Number(project.score || project.deterministicScore || 0);
-  const baselineDisplayScore = rawScore <= 10 ? rawScore * 10 : rawScore;
+    preferredIndustry: safeString(body.preferredIndustry),
+    portfolioGoal: safeString(body.portfolioGoal),
+    timeAvailable: safeString(body.timeAvailable),
+    buildStyle: safeString(body.buildStyle),
+    personalContext: safeString(body.personalContext)
+  };
+}
 
-  const rawConfidence = Number(
-    project.aiConfidence ?? project.geminiConfidence ?? 0
-  );
-
-  const finalScore = aiEnhanced
-    ? round1(baselineDisplayScore * 0.45 + rawConfidence * 0.55)
-    : round1(baselineDisplayScore);
-
-  const whyRecommended =
-    toArray(project.whyRecommended).length > 0
-      ? toArray(project.whyRecommended).slice(0, 3)
-      : toArray(project.aiStrengths).length > 0
-        ? toArray(project.aiStrengths).slice(0, 3)
-        : toArray(project.deterministicSignals).slice(0, 3);
-
-  const fitSummary =
-    safeString(
-      project.geminiFitSummary ||
-      project.aiFitSummary ||
-      project.fitSummary
-    ) ||
-    (aiEnhanced
-      ? "Gemini ranked this project as a strong fit for the submitted preferences."
-      : "The Gemini layer was unavailable, so the baseline recommender returned this project.");
-
-  const fallbackReason =
-    safeString(
-      project.aiReason ||
-      project.insightSnapshot?.fallbackReason ||
-      aiMeta?.reason
-    ) ||
-    (aiEnhanced ? "" : "Fallback mode is active.");
-
-  const uiRank =
-    Number.isFinite(Number(project.aiRank)) && Number(project.aiRank) > 0
-      ? Number(project.aiRank)
-      : index + 1;
+function projectToClient(project, index) {
+  const baseTitle = safeString(project.title);
+  const personalizedTitle = safeString(project.personalizedTitle);
+  const isGeminiEnhanced = Boolean(project.aiEnhanced);
 
   return {
-    _id: project._id,
-    title: project.title,
-    description: project.description,
+    _id: String(project._id || project.id || ""),
+    uiRank: index + 1,
+    displayRank: index + 1,
+
+    title: baseTitle,
+    baseTitle,
+    personalizedTitle: personalizedTitle || baseTitle,
+    displayTitle: personalizedTitle || baseTitle,
+
+    description: safeString(project.description),
+    displayBrief:
+      safeString(project.personalizedBrief) ||
+      safeString(project.description),
+
+    difficulty: safeString(project.difficulty),
+    projectType: safeString(project.projectType),
+
     technologies: toArray(project.technologies),
-    difficulty: project.difficulty,
     categories: toArray(project.categories),
-    projectType: project.projectType,
-    features: project.features || "",
-    learning: project.learning || "",
+    features: safeString(project.features),
+    learning: safeString(project.learning),
 
-    score: finalScore,
-    deterministicScore: round1(baselineDisplayScore),
-    scoreBreakdown: project.scoreBreakdown || null,
-    categoryMatches: toArray(project.categoryMatches),
-    technologyMatches: toArray(project.technologyMatches),
+    score: computeFinalScore(project),
+    deterministicScore: round1(project.deterministicScore || project.score || 0),
+    geminiScore: round1(project.geminiScore || 0),
+
+    geminiConfidence: isGeminiEnhanced
+      ? round1(project.geminiConfidence || project.aiConfidence || 0)
+      : 0,
+
+    aiConfidence: isGeminiEnhanced
+      ? round1(project.aiConfidence || project.geminiConfidence || 0)
+      : 0,
+
+    geminiAvailable: isGeminiEnhanced,
+    aiEnhanced: isGeminiEnhanced,
+    aiMode: safeString(project.aiMode),
+    aiReason: safeString(project.aiReason),
+
+    geminiFitSummary: safeString(project.aiFitSummary || project.fitSummary),
+    fitSummary: safeString(project.aiFitSummary || project.fitSummary),
+    fitSummaryDisplay: safeString(project.aiFitSummary || project.fitSummary),
+
+    whyRecommended: toArray(project.whyRecommended),
+    aiStrengths: toArray(project.aiStrengths),
     deterministicSignals: toArray(project.deterministicSignals),
+    scoreBreakdown: project.scoreBreakdown || {},
 
-    geminiAvailable: aiEnhanced,
-    geminiConfidence: aiEnhanced ? rawConfidence : 0,
-    geminiScore: aiEnhanced ? rawConfidence : 0,
-    geminiFitSummary: fitSummary,
-    fitSummary,
-    whyRecommended,
+    personalizedBrief: safeString(project.personalizedBrief),
+    customFeatures: toArray(project.customFeatures),
+    suggestedMilestones: toArray(project.suggestedMilestones),
+    portfolioAngle: safeString(project.portfolioAngle),
+    portfolioAngleDisplay: safeString(project.portfolioAngle)
+  };
+}
 
-    uiRank,
-    aiMeta: {
-      enabled: Boolean(aiMeta?.enabled),
-      used: Boolean(aiMeta?.used),
-      model: aiMeta?.model || null
-    },
+function sortClientRecommendations(projects = []) {
+  return [...projects]
+    .sort((a, b) => {
+      const aGemini = Boolean(a.geminiAvailable || a.aiEnhanced);
+      const bGemini = Boolean(b.geminiAvailable || b.aiEnhanced);
 
-    insightSnapshot: {
-      mode: aiEnhanced ? "gemini_assisted" : "deterministic_fallback",
-      geminiConfidence: `${Math.round(aiEnhanced ? rawConfidence : 0)}%`,
-      topSignals: whyRecommended,
-      fallbackReason: aiEnhanced ? "" : fallbackReason
-    },
+      // Gemini-personalized projects must stay above deterministic fallback projects.
+      // Otherwise fallback 100.0 scores pollute the top recommendation/report.
+      if (aGemini !== bGemini) {
+        return aGemini ? -1 : 1;
+      }
 
-    explanationLayer: {
-      mode: aiEnhanced ? "gemini_assisted" : "deterministic_fallback",
-      fitSummary,
-      whyRecommended
-    }
+      const aScore = Number(a.score || 0);
+      const bScore = Number(b.score || 0);
+
+      if (aScore !== bScore) {
+        return bScore - aScore;
+      }
+
+      const aDeterministic = Number(a.deterministicScore || 0);
+      const bDeterministic = Number(b.deterministicScore || 0);
+
+      if (aDeterministic !== bDeterministic) {
+        return bDeterministic - aDeterministic;
+      }
+
+      return Number(a.uiRank || 9999) - Number(b.uiRank || 9999);
+    })
+    .map((project, index) => ({
+      ...project,
+      uiRank: index + 1,
+      displayRank: index + 1
+    }));
+}
+
+function extractHybridMetadata(hybridResult = {}, finalProjects = []) {
+  const geminiProjects = finalProjects.filter(
+    (project) => project.geminiAvailable || project.aiEnhanced
+  );
+
+  const fallbackProjects = finalProjects.filter(
+    (project) => !(project.geminiAvailable || project.aiEnhanced)
+  );
+
+  return {
+    geminiUsed: Boolean(
+      hybridResult.geminiUsed ||
+        hybridResult.used ||
+        hybridResult.aiUsed ||
+        geminiProjects.length > 0
+    ),
+
+    geminiModel: safeString(
+      hybridResult.geminiModel ||
+        hybridResult.model ||
+        hybridResult.aiModel ||
+        process.env.GEMINI_MODEL
+    ),
+
+    geminiReason: safeString(
+      hybridResult.geminiReason ||
+        hybridResult.reason ||
+        hybridResult.error ||
+        ""
+    ),
+
+    fallbackUsed: fallbackProjects.length > 0,
+
+    totalRecommendations: finalProjects.length,
+    geminiRecommendations: geminiProjects.length,
+    fallbackRecommendations: fallbackProjects.length
   };
 }
 
 router.post("/", async (req, res) => {
   try {
-    let { skill, difficulty, interests, projectType, languages } = req.body || {};
+    const userPreferences = normalizePreferencePayload(req.body || {});
 
-    const userPreferences = {
-      skill: safeString(skill),
-      difficulty: safeString(difficulty).toLowerCase(),
-      interests: normalizeLowerArray(interests),
-      projectType: safeString(projectType).toLowerCase(),
-      languages: normalizeLowerArray(languages)
-    };
+    const projects = await Project.find().lean();
 
-    if (!userPreferences.difficulty || userPreferences.interests.length === 0) {
-      return res.status(400).json({
-        error: "Missing required fields: difficulty and at least one interest."
+    if (!projects.length) {
+      return res.json({
+        runId: "",
+        metadata: {
+          persisted: false,
+          totalRecommendations: 0,
+          geminiRecommendations: 0,
+          fallbackRecommendations: 0,
+          reason: "No projects found in database."
+        },
+        recommendations: []
       });
     }
 
-    const allProjects = await Project.find().lean();
-
-    if (!allProjects.length) {
-      return res.status(404).json({ error: "No projects found." });
-    }
-
-    const scoredProjects = scoreBaselineProjects(allProjects, userPreferences);
+    const scoredProjects = scoreBaselineProjects(projects, userPreferences);
     const shortlistedProjects = pickBaselineWindow(scoredProjects);
 
-    const hybrid = await buildHybridRecommendations({
+    const hybridResult = await buildHybridRecommendations({
       userPreferences,
       shortlistedProjects
     });
 
-    const unifiedProjects = hybrid.projects.map((project, index) =>
-      buildUnifiedProject(project, index, hybrid.aiMeta)
-    );
+    const rawHybridProjects = Array.isArray(hybridResult?.projects)
+      ? hybridResult.projects
+      : [];
 
-    return res.json(unifiedProjects);
-  } catch (err) {
-    console.error("Recommendation route error:", err);
-    return res.status(500).json({ error: "Server error." });
+    const clientProjects = rawHybridProjects.map(projectToClient);
+    const finalProjects = sortClientRecommendations(clientProjects);
+
+    const sessionId =
+      safeString(req.body.sessionId) ||
+      safeString(req.body.feedbackSessionId) ||
+      safeString(req.headers["x-session-id"]);
+
+    const hybridMetadata = extractHybridMetadata(hybridResult, finalProjects);
+
+    try {
+      const runRecord = await persistRecommendationRun({
+        sessionId,
+        userPreferences,
+        recommendations: finalProjects,
+        metadata: hybridMetadata
+      });
+
+      return res.json({
+        runId: runRecord.runId,
+        metadata: {
+          ...runRecord.metadata,
+          persisted: true
+        },
+        recommendations: runRecord.recommendations
+      });
+    } catch (persistError) {
+      console.error("Recommendation run persistence error:", persistError);
+
+      // Do not break recommendations if persistence fails.
+      return res.json({
+        runId: "",
+        metadata: {
+          ...hybridMetadata,
+          persisted: false,
+          persistenceError: persistError.message || "Failed to persist recommendation run."
+        },
+        recommendations: finalProjects
+      });
+    }
+  } catch (error) {
+    console.error("Recommendation route error:", error);
+
+    return res.status(500).json({
+      error: "Failed to generate recommendations."
+    });
   }
 });
 
