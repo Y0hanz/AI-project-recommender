@@ -33,7 +33,8 @@ const interestOptions = [
   "finance",
   "health",
   "productivity",
-  "automation"
+  "automation",
+  "analytics"
 ];
 
 const languageOptions = [

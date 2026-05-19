@@ -174,8 +174,8 @@ const technologyMap = {
   "network tools": "network tools",
   nlp: "nlp",
   crypto: "crypto",
-  "localstorage": "localStorage",
-  "local storage": "localStorage",
+  "localstorage": "localstorage",
+  "local storage": "localstorage",
   "vr sdk": "vr sdk"
 };
 
